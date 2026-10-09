@@ -1,0 +1,80 @@
+#!/opt/ic7100ctl/venv/bin/python
+"""Show or set the IC-7100's frequency, mode and power over CAT. Never keys the radio.
+
+usage:
+  radio-set                      show freq, mode, data mode, RF power
+  radio-set FREQ_MHZ [MODE] [d]  VFO A, set frequency; MODE optional (keeps
+                                 current); trailing "d" = DATA on, else off
+  radio-set power PCT            RF power 0-100 (percent of the radio's scale)
+  radio-set fmd                  shortcut: 145.000 FM d (Winlink / VARA FM)
+
+examples:
+  radio-set 146.52 FM            146.520 MHz FM, data off
+  radio-set 145.000 FM d         145.000 MHz FM-D
+  radio-set 28.410 USB           10 m SSB
+  radio-set power 25
+
+modes: LSB USB AM CW RTTY FM WFM CW-R RTTY-R DV
+
+The CAT port must be free: run `radio-mode digital` first (stops the panel).
+`radio-get` is the same program; use it with no arguments for a read-only look.
+"""
+import subprocess
+import sys
+
+from ic7100ctl.civ import CIVTransport
+from ic7100ctl.radio import IC7100, MODE_BY_NAME
+
+PORT = '/dev/ic7100'
+
+
+def show(r):
+    f = r.get_freq()
+    m = r.get_mode()
+    d = r.get_data_mode()
+    p = r.get_rf_power()
+    print(f'{f:.6f} MHz  {m}{"-D" if d else ""}  power {p}%')
+
+
+def main(args):
+    if args and args[0] in ('-h', '--help', 'help'):
+        print(__doc__)
+        return
+    if subprocess.run(['systemctl', 'is-active', '--quiet', 'ic7100ctl']).returncode == 0:
+        sys.exit('ic7100ctl is running and owns the radio: run `radio-mode digital` first')
+    if args == ['fmd']:
+        args = ['145.000', 'FM', 'd']
+    if args and args[0] == 'power':
+        if len(args) != 2 or not args[1].isdigit() or not 0 <= int(args[1]) <= 100:
+            sys.exit('usage: radio-set power 0-100')
+    elif args:
+        try:
+            float(args[0])
+        except ValueError:
+            sys.exit(f'bad frequency {args[0]!r}; try radio-set -h')
+        if len(args) > 1 and args[1].upper() not in MODE_BY_NAME and args[1].lower() not in ('d', 'data'):
+            sys.exit(f'unknown mode {args[1]!r}; try radio-set -h')
+
+    t = CIVTransport(PORT)
+    if not t.connect():
+        sys.exit(f'cannot open {PORT}')
+    r = IC7100(t)
+    steps = []
+    if args and args[0] == 'power':
+        steps = [('power', r.set_rf_power(int(args[1])))]
+    elif args:
+        rest = args[1:]
+        data = bool(rest) and rest[-1].lower() in ('d', 'data')
+        mode = rest[0].upper() if rest and rest[0].upper() in MODE_BY_NAME else None
+        steps = [('VFO A', r.select_vfo('A')), ('frequency', r.set_frequency(float(args[0])))]
+        if mode:
+            steps.append(('mode', r.set_mode(mode)))
+        steps.append(('data mode', r.set_data_mode(data)))
+    for name, ok in steps:
+        if not ok:
+            print(f'warning: {name} not accepted')
+    show(r)
+    t.disconnect()
+
+
+main(sys.argv[1:])

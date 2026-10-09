@@ -1,0 +1,67 @@
+From 003e77032cbd1bbe394360d3f2ece7c376f17b37 Mon Sep 17 00:00:00 2001
+From: "Brandon Barclay (AK6MJ)" <ak6mj@w7avm.org>
+Date: Thu, 8 Oct 2026 22:42:51 -0700
+Subject: [PATCH 2/3] Keep the browser's mic audio flowing while a hold-to-talk
+ key is held
+
+The page starts streaming speech the moment the PTT button goes down, but
+the radio only reports "transmitting" a poll or two later, and after the
+button is released a few frames are still in flight. With the audio gate
+keyed to radio.transmitting alone, the first and last few tens of
+milliseconds of speech could be dropped.
+
+The gate now also stays open while a hold-to-talk deadline is pending
+(radio._ptt_deadline), which covers both gaps. I have not measured how
+often the clipping actually happened; this is a precaution.
+
+The test checks the gate opens with a pending deadline and closes when it
+is cleared. It fails against the previous code.
+---
+ ic7100ctl/webrtc.py  |  8 ++++++--
+ tests/test_webrtc.py | 11 +++++++++++
+ 2 files changed, 17 insertions(+), 2 deletions(-)
+
+diff --git a/ic7100ctl/webrtc.py b/ic7100ctl/webrtc.py
+index 07e9c16..c152f08 100644
+--- a/ic7100ctl/webrtc.py
++++ b/ic7100ctl/webrtc.py
+@@ -164,8 +164,12 @@ class WebRTCBridge:
+         return (time.monotonic() - _TX_STATE['t']) < 1.0
+ 
+     def _tx_gate(self) -> bool:
+-        """True while the radio is keyed: only then is browser mic audio played."""
+-        return bool(getattr(self.radio, 'transmitting', False))
++        """True while the radio is keyed, or a hold-to-talk key is held: only
++        then is browser mic audio played. (The audio starts flowing the instant
++        the button goes down, a moment before the radio reports it is keyed.)"""
++        r = self.radio
++        return bool(getattr(r, 'transmitting', False)
++                    or getattr(r, '_ptt_deadline', None))
+ 
+     def start(self) -> None:
+         if self._thread:
+diff --git a/tests/test_webrtc.py b/tests/test_webrtc.py
+index 2b68820..acef773 100644
+--- a/tests/test_webrtc.py
++++ b/tests/test_webrtc.py
+@@ -132,6 +132,17 @@ class TxGateTests(unittest.TestCase):
+         bridge.radio.transmitting = True
+         self.assertTrue(webrtc.WebRTCBridge._tx_gate(bridge))
+ 
++    def test_gate_is_open_while_a_hold_to_talk_key_is_held(self):
++        import types
++        from ic7100ctl import webrtc
++        radio = types.SimpleNamespace(transmitting=False, _ptt_deadline=None)
++        bridge = types.SimpleNamespace(radio=radio)
++        self.assertFalse(webrtc.WebRTCBridge._tx_gate(bridge))
++        radio._ptt_deadline = time.monotonic() + 1.5        # key-down in flight
++        self.assertTrue(webrtc.WebRTCBridge._tx_gate(bridge))
++        radio._ptt_deadline = None                          # released
++        self.assertFalse(webrtc.WebRTCBridge._tx_gate(bridge))
++
+     def test_mic_audio_is_played_only_while_the_gate_is_open(self):
+         try:
+             import av
+-- 
+2.47.1
+

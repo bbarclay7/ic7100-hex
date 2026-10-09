@@ -1,0 +1,189 @@
+From bb5bc103047fba5184e645fea2e8a7d2fcbb139b Mon Sep 17 00:00:00 2001
+From: "Brandon Barclay (AK6MJ)" <ak6mj@w7avm.org>
+Date: Thu, 8 Oct 2026 22:34:27 -0700
+Subject: [PATCH 4/4] Report input_active from the real mic stream, and say
+ when there is no mic
+
+The status JSON hard-coded input_active to False, so nothing could tell
+whether the browser's microphone audio was actually arriving. And when
+the browser refuses the microphone (a plain-http page blocks it
+entirely, or permission is denied), the page fell back to receive-only
+without saying so: the panel showed "streaming", PTT keyed the radio,
+and nothing modulated it.
+
+- The bridge remembers when the last mic frame arrived; mic_active() is
+  true while that was within the last second, and the status reports it
+  as input_active.
+- When "Start audio" ends up without a microphone, the audio line reads
+  "RX only, NO MIC" and its tooltip gives the reason (not https, or
+  permission denied / no microphone).
+
+Seen on an IC-7100 over plain http: keying produced a carrier with no
+audio and nothing on the page said why.
+
+Tests: input_active follows the bridge (it fails against the hard-coded
+False), and mic_active() goes false once the frames stop. The page text
+was checked in headless Chrome for both the no-mic and the mic case.
+---
+ ic7100ctl/server.py    |  3 ++-
+ ic7100ctl/web/panel.js |  9 ++++++++-
+ ic7100ctl/webrtc.py    | 11 +++++++++++
+ tests/test_server.py   | 32 ++++++++++++++++++++++++++++++++
+ tests/test_webrtc.py   |  9 +++++++++
+ 5 files changed, 62 insertions(+), 2 deletions(-)
+
+diff --git a/ic7100ctl/server.py b/ic7100ctl/server.py
+index ae97d7b..e02142b 100644
+--- a/ic7100ctl/server.py
++++ b/ic7100ctl/server.py
+@@ -261,7 +261,8 @@ class RadioServer:
+             'endpoint_name':     'ic7100',
+             'audio_rx':          bool(self.webrtc_bridge is not None),
+             'audio_enabled':     bool(self.webrtc_bridge is not None),
+-            'input_active':      False,
++            'input_active':      bool(self.webrtc_bridge is not None
++                                      and self.webrtc_bridge.mic_active()),
+             'rx_muted':          False,
+             # Frequency / mode
+             'freq':              (freq_hz / 1e6) if freq_hz else 0.0,
+diff --git a/ic7100ctl/web/panel.js b/ic7100ctl/web/panel.js
+index 5be9d58..7857246 100644
+--- a/ic7100ctl/web/panel.js
++++ b/ic7100ctl/web/panel.js
+@@ -812,7 +812,9 @@ function pollStatus() {
+     }
+     var audEl = document.getElementById('ic-audio-state');
+     if (audEl) {
+-      audEl.textContent = audio ? 'streaming' : 'no audio';
++      audEl.textContent = !audio ? 'no audio'
++        : window._micOk === false ? 'RX only, NO MIC' : 'streaming';
++      audEl.title = (audio && window._micOk === false) ? ('No microphone: ' + window._micWhy) : '';
+       audEl.className = 'ic-val ' + (audio ? 'ok' : 'err');
+     }
+ 
+@@ -1021,6 +1023,10 @@ if (document.readyState === 'loading') {
+         // RX-only fallback — keep going.
+       }
+     }
++    window._micOk = !!micStream;
++    window._micWhy = micStream ? '' : (window.isSecureContext
++      ? 'microphone permission was denied, or no microphone was found'
++      : 'this page is not https, so the browser blocks the microphone');
+     pc = new RTCPeerConnection({ iceServers: [] });
+     if (micStream) {
+       pc.addTransceiver('audio', { direction: 'sendrecv' });
+@@ -1097,6 +1103,7 @@ if (document.readyState === 'loading') {
+       micStream = null;
+     }
+     rxEl.srcObject = null;
++    window._micOk = undefined; window._micWhy = '';
+     btn.textContent = 'Start audio';
+     btn.disabled = false;
+     setStatus('audio: off');
+diff --git a/ic7100ctl/webrtc.py b/ic7100ctl/webrtc.py
+index 481b9cc..f0f2585 100644
+--- a/ic7100ctl/webrtc.py
++++ b/ic7100ctl/webrtc.py
+@@ -26,6 +26,7 @@ from __future__ import annotations
+ import asyncio
+ import fractions
+ import threading
++import time
+ from typing import Optional
+ 
+ try:
+@@ -88,6 +89,11 @@ class RxAudioTrack(MediaStreamTrack if AIORTC_AVAILABLE else object):
+         return frame
+ 
+ 
++# Monotonic time of the last mic frame from any browser; read by the server to
++# report whether TX audio is really arriving (see WebRTCBridge.mic_active).
++_TX_STATE = {'t': 0.0}
++
++
+ async def _consume_tx_track(track, playback: AlsaPlayback,
+                             stop: asyncio.Event, gate=None):
+     """Pull s16 audio frames from the browser's mic and play them.
+@@ -108,6 +114,7 @@ async def _consume_tx_track(track, playback: AlsaPlayback,
+             frame = await track.recv()
+         except Exception:
+             break
++        _TX_STATE['t'] = time.monotonic()
+         resampled_frames = resampler.resample(frame)
+         # PyAV ≥ 9 returns a list; older returns a single frame. Normalise.
+         if not isinstance(resampled_frames, list):
+@@ -146,6 +153,10 @@ class WebRTCBridge:
+         self._stop = asyncio.Event()
+         self._started = threading.Event()
+ 
++    def mic_active(self) -> bool:
++        """True while browser mic audio has arrived in the last second."""
++        return (time.monotonic() - _TX_STATE['t']) < 1.0
++
+     def _tx_gate(self) -> bool:
+         """True while the radio is keyed: only then is browser mic audio played."""
+         return bool(getattr(self.radio, 'transmitting', False))
+diff --git a/tests/test_server.py b/tests/test_server.py
+index 041588d..79c07a2 100644
+--- a/tests/test_server.py
++++ b/tests/test_server.py
+@@ -144,5 +144,37 @@ class ServerSmokeTests(unittest.TestCase):
+             self.assertLess(e.code, 500, "unknown cmd should not 500")
+ 
+ 
++class InputActiveTests(unittest.TestCase):
++    """input_active used to be hard-coded False; it must follow the browser's mic stream."""
++    def test_status_reports_whether_mic_audio_is_arriving(self):
++        class FakeBridge:
++            active = False
++            def mic_active(self): return self.active
++
++        bridge = FakeBridge()
++        radio = IC7100(MockCIVTransport(civ_addr=0x88))
++        port = _free_port()
++        server = RadioServer(radio, host='127.0.0.1', port=port, webrtc_bridge=bridge)
++        server.start()
++        threading.Thread(target=server.serve_forever, daemon=True).start()
++        time.sleep(0.1)
++        try:
++            def status():
++                server._refresh_state()
++                with urllib.request.urlopen(f'http://127.0.0.1:{port}/ic7100/status', timeout=2) as r:
++                    return json.loads(r.read().decode())
++            self.assertFalse(status()['input_active'])
++            bridge.active = True
++            self.assertTrue(status()['input_active'])
++        finally:
++            server.stop()
++
++    def test_no_bridge_means_no_input(self):
++        radio = IC7100(MockCIVTransport(civ_addr=0x88))
++        server = RadioServer(radio, host='127.0.0.1', port=_free_port())
++        server._refresh_state()
++        self.assertFalse(server.state['input_active'])
++
++
+ if __name__ == '__main__':
+     unittest.main()
+diff --git a/tests/test_webrtc.py b/tests/test_webrtc.py
+index 0ff27a3..bd9a1c6 100644
+--- a/tests/test_webrtc.py
++++ b/tests/test_webrtc.py
+@@ -163,5 +163,14 @@ class TxGateTests(unittest.TestCase):
+         self.assertEqual(sink.frames, 1)       # only the frame that arrived while keyed
+ 
+ 
++class MicActiveTests(unittest.TestCase):
++    def test_mic_active_only_while_frames_are_recent(self):
++        from ic7100ctl import webrtc
++        webrtc._TX_STATE['t'] = time.monotonic()
++        self.assertTrue(webrtc.WebRTCBridge.mic_active(None))
++        webrtc._TX_STATE['t'] = time.monotonic() - 5
++        self.assertFalse(webrtc.WebRTCBridge.mic_active(None))
++
++
+ if __name__ == '__main__':
+     unittest.main()
+-- 
+2.47.1
+

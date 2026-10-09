@@ -1,0 +1,320 @@
+From 6626e29812e1ec39527d53ddd4671c915ff2d6df Mon Sep 17 00:00:00 2001
+From: "Brandon Barclay (AK6MJ)" <ak6mj@w7avm.org>
+Date: Thu, 8 Oct 2026 22:33:12 -0700
+Subject: [PATCH 3/4] Respawn arecord/aplay when the sound card disappears
+
+The module docstring says that if the codec disappears (USB unplug) "the
+pipe closes and we just respawn on next start()", but nothing calls
+start() again, and start() returned early because the dead process was
+still recorded. After the radio was unplugged and plugged back in, the
+panel kept running with no audio in either direction: RX was silent and
+the browser's mic audio went into a dead pipe, until the service was
+restarted. (On an IC-7100 the second symptom looked like a radio that
+keys but modulates nothing: the TX meters stayed at idle.)
+
+Each pipe now respawns its own arecord/aplay every 2 s after it dies
+(RETRY_S), drops the audio that piled up meanwhile, and logs the loss
+and the recovery once instead of on every retry.
+
+Checked on an IC-7100: killing arecord and aplay by hand, both were back
+within 6 s with the service still running. I have not repeated this with
+a physical unplug after the change.
+
+The tests simulate a pipe breaking (aplay) and arecord hitting EOF; both
+fail against the previous code and pass now.
+---
+ ic7100ctl/audio.py  | 133 +++++++++++++++++++++++++++++++++-----------
+ tests/test_audio.py |  82 ++++++++++++++++++++++++++-
+ 2 files changed, 179 insertions(+), 36 deletions(-)
+
+diff --git a/ic7100ctl/audio.py b/ic7100ctl/audio.py
+index b468e1d..49ed320 100644
+--- a/ic7100ctl/audio.py
++++ b/ic7100ctl/audio.py
+@@ -45,10 +45,9 @@ class AlsaCapture:
+         self._reader: Optional[threading.Thread] = None
+         self._stop = threading.Event()
+ 
+-    def start(self) -> None:
+-        if self._proc is not None:
+-            return
+-        self._stop.clear()
++    RETRY_S = 2.0                # how often to retry after the codec disappears
++
++    def _spawn(self) -> subprocess.Popen:
+         cmd = [
+             'arecord',
+             '-D', self.device,
+@@ -59,26 +58,52 @@ class AlsaCapture:
+             '--buffer-size=4800',   # 100 ms total ALSA buffer
+             '-q',
+         ]
+-        self._proc = subprocess.Popen(
++        return subprocess.Popen(
+             cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+             bufsize=0)
++
++    def start(self) -> None:
++        if self._reader is not None and self._reader.is_alive():
++            return
++        self._stop.clear()
++        self._proc = self._spawn()
+         self._reader = threading.Thread(
+             target=self._read_loop, name='alsa-capture', daemon=True)
+         self._reader.start()
+         print(f"[audio] capture started on {self.device}", flush=True)
+ 
+     def _read_loop(self) -> None:
+-        assert self._proc is not None
+         accum = b''
++        reported = False
+         while not self._stop.is_set():
+-            need = BYTES_PER_FRAME - len(accum)
+-            try:
+-                chunk = self._proc.stdout.read(need)
+-            except (ValueError, OSError):
+-                break
++            proc = self._proc
++            chunk = b''
++            if proc is not None:
++                need = BYTES_PER_FRAME - len(accum)
++                try:
++                    chunk = proc.stdout.read(need)
++                except (ValueError, OSError):
++                    chunk = b''
+             if not chunk:
+-                # EOF — pipe closed (arecord died).
+-                break
++                # EOF: arecord died (codec unplugged, card renumbered...).
++                # Respawn it ourselves; nothing else will.
++                if self._stop.is_set():
++                    break
++                if not reported:
++                    print(f"[audio] capture lost on {self.device}: retrying every "
++                          f"{self.RETRY_S:g} s", flush=True)
++                    reported = True
++                accum = b''
++                if self._stop.wait(self.RETRY_S):
++                    break
++                try:
++                    self._proc = self._spawn()
++                except OSError:
++                    self._proc = None
++                continue
++            if reported and self._proc is not None and self._proc.poll() is None:
++                print(f"[audio] capture restored on {self.device}", flush=True)
++                reported = False
+             accum += chunk
+             if len(accum) < BYTES_PER_FRAME:
+                 continue
+@@ -144,45 +169,85 @@ class AlsaPlayback:
+         self._writer: Optional[threading.Thread] = None
+         self._stop = threading.Event()
+ 
++    RETRY_S = 2.0                # how often to retry after the codec disappears
++
++    def _spawn(self) -> subprocess.Popen:
++        cmd = [
++            'aplay',
++            '-D', self.device,
++            '-f', 'S16_LE',
++            '-r', str(self.rate),
++            '-c', str(self.channels),
++            '-t', 'raw',
++            '--buffer-size=4800',
++            '-q',
++        ]
++        return subprocess.Popen(
++            cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL,
++            bufsize=0)
++
+     def start(self) -> None:
+         with self._lock:
+-            if self._proc is not None:
++            if self._writer is not None and self._writer.is_alive():
+                 return
+-            cmd = [
+-                'aplay',
+-                '-D', self.device,
+-                '-f', 'S16_LE',
+-                '-r', str(self.rate),
+-                '-c', str(self.channels),
+-                '-t', 'raw',
+-                '--buffer-size=4800',
+-                '-q',
+-            ]
+-            self._proc = subprocess.Popen(
+-                cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL,
+-                bufsize=0)
+             self._stop.clear()
++            self._proc = self._spawn()
+             self._writer = threading.Thread(
+-                target=self._write_loop, args=(self._proc,),
+-                name='alsa-playback', daemon=True)
++                target=self._write_loop, name='alsa-playback', daemon=True)
+             self._writer.start()
+             print(f"[audio] playback started on {self.device}", flush=True)
+ 
+-    def _write_loop(self, proc) -> None:
++    def _drain(self) -> None:
++        while not self._q.empty():
++            try:
++                self._q.get_nowait()
++            except queue.Empty:
++                break
++
++    def _write_loop(self) -> None:
++        reported = False
+         while not self._stop.is_set():
++            proc = self._proc
++            if proc is None:
++                # aplay died (codec unplugged, card renumbered...): respawn it
++                # ourselves, dropping the stale audio that piled up meanwhile.
++                if self._stop.wait(self.RETRY_S):
++                    break
++                self._drain()
++                try:
++                    with self._lock:
++                        if self._stop.is_set():
++                            break
++                        self._proc = self._spawn()
++                except OSError:
++                    self._proc = None
++                continue
+             try:
+                 frame = self._q.get(timeout=0.2)
+             except queue.Empty:
+-                continue
++                if getattr(proc, 'poll', lambda: None)() is not None:      # died while idle
++                    frame = None
++                else:
++                    continue
+             try:
++                if frame is None:
++                    raise BrokenPipeError
+                 proc.stdin.write(frame)
++                if reported and proc.poll() is None:
++                    print(f"[audio] playback restored on {self.device}", flush=True)
++                    reported = False
+             except (BrokenPipeError, OSError, ValueError):
+-                # Pipe closed (codec disappeared, aplay died, etc.) —
+-                # mark dead so the next start() respawns.
+                 with self._lock:
+                     if self._proc is proc:
+                         self._proc = None
+-                return
++                try:
++                    proc.stdin.close()
++                except Exception:
++                    pass
++                if not reported:
++                    print(f"[audio] playback lost on {self.device}: retrying every "
++                          f"{self.RETRY_S:g} s", flush=True)
++                    reported = True
+ 
+     def write_frame(self, frame: bytes) -> None:
+         """Queue a frame without ever blocking the caller."""
+diff --git a/tests/test_audio.py b/tests/test_audio.py
+index 69cc5d1..580f5fa 100644
+--- a/tests/test_audio.py
++++ b/tests/test_audio.py
+@@ -1,10 +1,11 @@
+-"""AlsaPlayback must never block the caller (it runs on the WebRTC asyncio loop)."""
++"""AlsaPlayback must never block the caller (it runs on the WebRTC asyncio loop), and AlsaCapture /
++AlsaPlayback must recover by themselves when the codec disappears (USB unplug / re-plug)."""
+ import threading
+ import time
+ import unittest
+ from unittest import mock
+ 
+-from ic7100ctl.audio import AlsaPlayback
++from ic7100ctl.audio import AlsaCapture, AlsaPlayback, BYTES_PER_FRAME
+ 
+ 
+ class PlaybackNeverBlocksTests(unittest.TestCase):
+@@ -33,5 +34,82 @@ class PlaybackNeverBlocksTests(unittest.TestCase):
+             self.assertLessEqual(pb._q.qsize(), pb.QUEUE_FRAMES)
+ 
+ 
++def _wait(cond, secs=3.0):
++    end = time.monotonic() + secs
++    while time.monotonic() < end:
++        if cond():
++            return True
++        time.sleep(0.02)
++    return False
++
++
++class PlaybackRecoveryTests(unittest.TestCase):
++    def test_aplay_is_respawned_after_the_pipe_breaks(self):
++        class Dead:
++            class stdin:
++                @staticmethod
++                def write(b): raise BrokenPipeError
++                @staticmethod
++                def close(): pass
++            def poll(self): return 1
++            def terminate(self): pass
++            def wait(self, timeout=None): pass
++            def kill(self): pass
++
++        class Good:
++            def __init__(self):
++                self.got = []
++                outer = self
++                class S:
++                    def write(self, b): outer.got.append(b)
++                    def close(self): pass
++                self.stdin = S()
++            def poll(self): return None
++            def terminate(self): pass
++            def wait(self, timeout=None): pass
++            def kill(self): pass
++
++        good = Good()
++        with mock.patch('ic7100ctl.audio.subprocess.Popen', side_effect=[Dead(), good]) as popen:
++            pb = AlsaPlayback('null'); pb.RETRY_S = 0.05; pb.start()
++            ok = _wait(lambda: (pb.write_frame(b'\x01' * BYTES_PER_FRAME), bool(good.got))[1])
++            pb.stop()
++        self.assertTrue(ok, 'no audio reached the respawned aplay')
++        self.assertEqual(popen.call_count, 2)
++
++
++class CaptureRecoveryTests(unittest.TestCase):
++    def test_arecord_is_respawned_after_eof(self):
++        class Eof:
++            class stdout:
++                @staticmethod
++                def read(n): return b''
++            def poll(self): return 1
++            def terminate(self): pass
++            def wait(self, timeout=None): pass
++            def kill(self): pass
++
++        class Live:
++            class stdout:
++                @staticmethod
++                def read(n):
++                    time.sleep(0.01)
++                    return b'\x02' * n
++            def poll(self): return None
++            def terminate(self): pass
++            def wait(self, timeout=None): pass
++            def kill(self): pass
++
++        with mock.patch('ic7100ctl.audio.subprocess.Popen', side_effect=[Eof(), Live()]) as popen:
++            cap = AlsaCapture('null'); cap.RETRY_S = 0.05; cap.start()
++            got = []
++            ok = _wait(lambda: (got.append(cap.read_frame(0.05)), bool(got[-1]))[1])
++            frame = got[-1]
++            cap.stop()
++        self.assertTrue(ok, 'no frame after the codec came back')
++        self.assertEqual(len(frame), BYTES_PER_FRAME)
++        self.assertEqual(popen.call_count, 2)
++
++
+ if __name__ == '__main__':
+     unittest.main()
+-- 
+2.47.1
+

@@ -1,0 +1,186 @@
+From 03bc82f843887bfbf2b4209591bf8f26e8410f4b Mon Sep 17 00:00:00 2001
+From: "Brandon Barclay (AK6MJ)" <ak6mj@w7avm.org>
+Date: Thu, 8 Oct 2026 22:31:55 -0700
+Subject: [PATCH 1/4] Never block the event loop on an aplay write
+
+AlsaPlayback.write_frame() is called from the WebRTC asyncio loop and
+wrote straight into aplay's stdin pipe. When aplay stops draining (the
+codec stalls, or the buffer fills), that write blocks the whole loop,
+which also serves the RX audio and keeps the peer connection alive: RX
+audio garbled and then stopped as soon as the browser's mic stream was on.
+
+write_frame() now only queues the frame (bounded, ~0.5 s; the oldest is
+dropped when full) and a writer thread does the blocking pipe write.
+
+Seen on an IC-7100 with the mic stream on: RX audio garbled and then
+stopped; with this change it keeps playing.
+
+The test feeds 500 frames to a stuck aplay and checks the caller returns
+at once. It fails against the previous code.
+---
+ ic7100ctl/audio.py  | 85 +++++++++++++++++++++++++++++++++------------
+ tests/test_audio.py | 37 ++++++++++++++++++++
+ 2 files changed, 100 insertions(+), 22 deletions(-)
+ create mode 100644 tests/test_audio.py
+
+diff --git a/ic7100ctl/audio.py b/ic7100ctl/audio.py
+index 48d8320..b468e1d 100644
+--- a/ic7100ctl/audio.py
++++ b/ic7100ctl/audio.py
+@@ -123,7 +123,15 @@ class AlsaCapture:
+ 
+ 
+ class AlsaPlayback:
+-    """Writes s16le 48 kHz mono PCM frames to an ALSA device via aplay."""
++    """Writes s16le 48 kHz mono PCM frames to an ALSA device via aplay.
++
++    `write_frame()` is called from the WebRTC asyncio loop, so it must never
++    block: it only queues the frame. A writer thread does the (blocking) pipe
++    write. If aplay can't keep up the oldest queued audio is dropped, so a
++    stalled codec can no longer freeze the RX audio or the peer connection.
++    """
++
++    QUEUE_FRAMES = 25            # ~0.5 s of 20 ms chunks
+ 
+     def __init__(self, device: str, rate: int = SAMPLE_RATE,
+                  channels: int = CHANNELS):
+@@ -132,6 +140,9 @@ class AlsaPlayback:
+         self.channels = channels
+         self._proc: Optional[subprocess.Popen] = None
+         self._lock = threading.Lock()
++        self._q: queue.Queue = queue.Queue(maxsize=self.QUEUE_FRAMES)
++        self._writer: Optional[threading.Thread] = None
++        self._stop = threading.Event()
+ 
+     def start(self) -> None:
+         with self._lock:
+@@ -150,32 +161,62 @@ class AlsaPlayback:
+             self._proc = subprocess.Popen(
+                 cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                 bufsize=0)
++            self._stop.clear()
++            self._writer = threading.Thread(
++                target=self._write_loop, args=(self._proc,),
++                name='alsa-playback', daemon=True)
++            self._writer.start()
+             print(f"[audio] playback started on {self.device}", flush=True)
+ 
+-    def write_frame(self, frame: bytes) -> None:
+-        with self._lock:
+-            if not self._proc or not self._proc.stdin:
+-                return
++    def _write_loop(self, proc) -> None:
++        while not self._stop.is_set():
++            try:
++                frame = self._q.get(timeout=0.2)
++            except queue.Empty:
++                continue
+             try:
+-                self._proc.stdin.write(frame)
+-            except (BrokenPipeError, OSError):
++                proc.stdin.write(frame)
++            except (BrokenPipeError, OSError, ValueError):
+                 # Pipe closed (codec disappeared, aplay died, etc.) —
+                 # mark dead so the next start() respawns.
+-                self._proc = None
++                with self._lock:
++                    if self._proc is proc:
++                        self._proc = None
++                return
++
++    def write_frame(self, frame: bytes) -> None:
++        """Queue a frame without ever blocking the caller."""
++        try:
++            self._q.put_nowait(frame)
++        except queue.Full:
++            try:
++                self._q.get_nowait()          # drop the oldest
++            except queue.Empty:
++                pass
++            try:
++                self._q.put_nowait(frame)
++            except queue.Full:
++                pass
+ 
+     def stop(self) -> None:
++        self._stop.set()
+         with self._lock:
+-            if self._proc:
+-                try:
+-                    if self._proc.stdin:
+-                        self._proc.stdin.close()
+-                except Exception:
+-                    pass
+-                try:
+-                    self._proc.terminate()
+-                    self._proc.wait(timeout=2)
+-                except subprocess.TimeoutExpired:
+-                    self._proc.kill()
+-                except Exception:
+-                    pass
+-            self._proc = None
++            proc, self._proc = self._proc, None
++        if proc:
++            try:
++                if proc.stdin:
++                    proc.stdin.close()
++            except Exception:
++                pass
++            try:
++                proc.terminate()
++                proc.wait(timeout=2)
++            except subprocess.TimeoutExpired:
++                proc.kill()
++            except Exception:
++                pass
++        while not self._q.empty():
++            try:
++                self._q.get_nowait()
++            except queue.Empty:
++                break
+diff --git a/tests/test_audio.py b/tests/test_audio.py
+new file mode 100644
+index 0000000..69cc5d1
+--- /dev/null
++++ b/tests/test_audio.py
+@@ -0,0 +1,37 @@
++"""AlsaPlayback must never block the caller (it runs on the WebRTC asyncio loop)."""
++import threading
++import time
++import unittest
++from unittest import mock
++
++from ic7100ctl.audio import AlsaPlayback
++
++
++class PlaybackNeverBlocksTests(unittest.TestCase):
++    def test_write_frame_returns_immediately_even_if_aplay_is_stuck(self):
++        class StuckStdin:
++            def write(self, b): time.sleep(5)          # aplay not draining
++            def close(self): pass
++
++        class FakeProc:
++            stdin = StuckStdin()
++            def terminate(self): pass
++            def wait(self, timeout=None): pass
++            def kill(self): pass
++
++        with mock.patch('ic7100ctl.audio.subprocess.Popen', return_value=FakeProc()):
++            pb = AlsaPlayback('null'); pb.start()
++
++            def burst():
++                for _ in range(500):                    # far more than the queue holds
++                    pb.write_frame(b'\x00' * 1920)
++
++            t = threading.Thread(target=burst, daemon=True)
++            t0 = time.monotonic(); t.start(); t.join(2.0)
++            self.assertFalse(t.is_alive(), 'write_frame blocked on a stuck aplay')
++            self.assertLess(time.monotonic() - t0, 0.5)
++            self.assertLessEqual(pb._q.qsize(), pb.QUEUE_FRAMES)
++
++
++if __name__ == '__main__':
++    unittest.main()
+-- 
+2.47.1
+

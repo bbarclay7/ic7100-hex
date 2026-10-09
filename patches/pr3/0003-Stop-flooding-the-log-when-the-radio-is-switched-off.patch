@@ -1,0 +1,181 @@
+From fab20e0bda3947042efb93e75a90c992944d8757 Mon Sep 17 00:00:00 2001
+From: "Brandon Barclay (AK6MJ)" <ak6mj@w7avm.org>
+Date: Thu, 8 Oct 2026 22:40:19 -0700
+Subject: [PATCH 3/4] Stop flooding the log when the radio is switched off, and
+ report it
+
+A radio that is switched off (or not answering) times out on every CI-V
+command, several times a second, and every timeout was logged: thousands
+of lines an hour, and the polling kept hammering the serial port.
+
+- CIVTransport counts consecutive timeouts. It logs the first timeout,
+  one line when five in a row show the radio is not answering, and one
+  when it answers again; nothing in between.
+- The poll loop slows to every 2 s while the radio is silent.
+- The status JSON gets radio_responding (false after 3 timeouts in a row),
+  so a client can tell "radio off" from "serial port missing".
+
+The tests drive a fake serial port: 40 timeouts produce exactly two log
+lines, and an answer after 7 timeouts is logged once and resets the count;
+the status flag flips with the count. All three fail against the previous
+code. I have not re-run this exact branch against a switched-off radio.
+---
+ ic7100ctl/civ.py     | 24 +++++++++++++++++++++++-
+ ic7100ctl/server.py  |  5 ++++-
+ tests/test_civ.py    | 43 +++++++++++++++++++++++++++++++++++++++++++
+ tests/test_server.py | 10 ++++++++++
+ 4 files changed, 80 insertions(+), 2 deletions(-)
+
+diff --git a/ic7100ctl/civ.py b/ic7100ctl/civ.py
+index ad97f56..595b6b3 100644
+--- a/ic7100ctl/civ.py
++++ b/ic7100ctl/civ.py
+@@ -145,6 +145,7 @@ class CIVTransport:
+         self._serial = None
+         self._lock = threading.Lock()
+         self.connected = False
++        self.consecutive_timeouts = 0   # CI-V commands in a row with no answer
+         # Caller-owned abort signal — set by user-command path, checked by
+         # the poll loop between reads. Exposed so callers can wait/clear it.
+         self.user_cmd_pending = threading.Event()
+@@ -227,17 +228,38 @@ class CIVTransport:
+                                     and buf[idx + 2] == self.ctrl_addr):
+                                 end = buf.find(END, idx + 4)
+                                 if end != -1:
++                                    self._answered()
+                                     return buf[idx + 4:end]
+                             idx += 1
+                     else:
+                         time.sleep(0.002)
+-                print(f"[CIV] Timeout on cmd 0x{frame[4]:02x}", flush=True)
++                self._timed_out(frame[4])
+                 return None
+             except Exception as e:
+                 print(f"[CIV] Transact error: {e}", flush=True)
+                 self.connected = False
+                 return None
+ 
++    # A radio that is switched off times out on every command, several times a
++    # second. Log the first timeout, one line when it is clearly not answering,
++    # and one when it answers again, instead of thousands of lines an hour.
++    QUIET_AFTER_TIMEOUTS = 5
++
++    def _timed_out(self, cmd: int) -> None:
++        self.consecutive_timeouts += 1
++        n = self.consecutive_timeouts
++        if n == 1:
++            print(f"[CIV] Timeout on cmd 0x{cmd:02x}", flush=True)
++        elif n == self.QUIET_AFTER_TIMEOUTS:
++            print("[CIV] radio is not answering (switched off?); polling slows "
++                  "down and further timeouts are not logged until it answers",
++                  flush=True)
++
++    def _answered(self) -> None:
++        n, self.consecutive_timeouts = self.consecutive_timeouts, 0
++        if n >= self.QUIET_AFTER_TIMEOUTS:
++            print(f"[CIV] radio is answering again (after {n} timeouts)", flush=True)
++
+     def send_raw(self, frame: bytes) -> Optional[bytes]:
+         """Send a pre-built CI-V frame (for CAT passthrough). Returns body."""
+         return self.transact(frame)
+diff --git a/ic7100ctl/server.py b/ic7100ctl/server.py
+index a34b1f9..38e8411 100644
+--- a/ic7100ctl/server.py
++++ b/ic7100ctl/server.py
+@@ -262,7 +262,9 @@ class RadioServer:
+                 traceback.print_exc()
+ 
+             tick += 1
+-            self._sleep(self.fast_interval)
++            # Radio not answering (off?): poll every 2 s instead of hammering the port.
++            silent = t is not None and getattr(t, 'consecutive_timeouts', 0) >= 5
++            self._sleep(2.0 if silent else self.fast_interval)
+ 
+     def _sleep(self, secs: float) -> None:
+         # Wake up promptly on stop.
+@@ -284,6 +286,7 @@ class RadioServer:
+             # here so audio_rx is always None (the panel treats that as
+             # "no audio" — fine for standalone CI-V-only use).
+             'connected':         connected,
++            'radio_responding':  getattr(getattr(r, 't', None), 'consecutive_timeouts', 0) < 3,
+             'serial_connected':  connected,
+             'endpoint_name':     'ic7100',
+             'audio_rx':          bool(self.webrtc_bridge is not None),
+diff --git a/tests/test_civ.py b/tests/test_civ.py
+index 59f7042..9404965 100644
+--- a/tests/test_civ.py
++++ b/tests/test_civ.py
+@@ -110,6 +110,49 @@ class FairnessFlagsTests(unittest.TestCase):
+         self.assertTrue(t._tls.in_poll)
+ 
+ 
++class SilentRadioLoggingTests(unittest.TestCase):
++    """A switched-off radio times out on every poll; the log must not fill up."""
++
++    class FakeSerial:
++        def __init__(self): self.reply = b''
++        in_waiting = property(lambda self: len(self.reply))
++        def write(self, b): pass
++        def reset_input_buffer(self): pass
++        def read(self, n):
++            out, self.reply = self.reply[:n], self.reply[n:]
++            return out
++
++    def _transport(self):
++        from ic7100ctl.civ import CIVTransport
++        t = CIVTransport('fake', timeout=0.01, poll_timeout=0.01)
++        t._serial = self.FakeSerial(); t.connected = True
++        return t
++
++    def test_only_the_first_timeout_and_one_summary_line_are_logged(self):
++        import io, contextlib
++        t = self._transport(); frame = t.build_frame(0x03)
++        buf = io.StringIO()
++        with contextlib.redirect_stdout(buf):
++            for _ in range(40):
++                self.assertIsNone(t.transact(frame))
++        lines = buf.getvalue().strip().splitlines()
++        self.assertEqual(len(lines), 2, lines)
++        self.assertIn('Timeout on cmd 0x03', lines[0])
++        self.assertIn('not answering', lines[1])
++        self.assertEqual(t.consecutive_timeouts, 40)
++
++    def test_recovery_is_logged_once_and_resets_the_count(self):
++        import io, contextlib
++        t = self._transport(); frame = t.build_frame(0x03)
++        buf = io.StringIO()
++        with contextlib.redirect_stdout(buf):
++            for _ in range(7): t.transact(frame)
++            t._serial.reply = bytes([0xFE, 0xFE, 0xE0, 0x88, 0xFB, 0xFD])   # radio answers: OK
++            self.assertEqual(t.transact(frame), b'\xfb')
++        self.assertEqual(t.consecutive_timeouts, 0)
++        self.assertIn('answering again (after 7 timeouts)', buf.getvalue())
++
++
+ if __name__ == '__main__':
+     unittest.main()
+ 
+diff --git a/tests/test_server.py b/tests/test_server.py
+index 7d47a9a..43aeee3 100644
+--- a/tests/test_server.py
++++ b/tests/test_server.py
+@@ -123,6 +123,16 @@ class ServerSmokeTests(unittest.TestCase):
+         st = self._get_json('/ic7100/status')
+         self.assertEqual((st['po'], st['swr'], st['alc']), (0, 0, 0))
+ 
++    def test_status_says_whether_the_radio_is_answering(self):
++        self.assertTrue(self._get_json('/ic7100/status')['radio_responding'])
++        self.transport.consecutive_timeouts = 9          # radio switched off
++        try:
++            self.server._refresh_state()
++            self.assertFalse(self._get_json('/ic7100/status')['radio_responding'])
++        finally:
++            del self.transport.consecutive_timeouts
++            self.server._refresh_state()
++
+     def test_post_mode(self):
+         r = self._post_json('/ic7100cmd', {'cmd': 'mode', 'mode': 'FM'})
+         self.assertTrue(r['ok'])
+-- 
+2.47.1
+

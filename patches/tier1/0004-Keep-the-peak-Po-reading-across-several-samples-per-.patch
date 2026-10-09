@@ -1,0 +1,84 @@
+From c2eb0b4d13ff39b7a8a4e907ae857f6674dc01a4 Mon Sep 17 00:00:00 2001
+From: "Brandon Barclay (AK6MJ)" <ak6mj@w7avm.org>
+Date: Sat, 3 Oct 2026 19:22:42 -0700
+Subject: [PATCH 4/5] Keep the peak Po reading across several samples per TX
+ cycle
+
+SSB power follows the voice envelope, and poll_meters_tx() read Po once
+per cycle, which mostly lands between syllables. On an IC-7100 in USB, Po
+read exactly 0 for a whole 13 s transmit while the ALC (which holds its
+value) moved normally and the head unit's Po bar showed the output.
+
+Read Po between the other reads too (four samples per cycle) and report the
+peak. SWR and ALC are still read once per cycle.
+
+After the change the same kind of transmit shows Po peaks (e.g. 29-58 raw
+at a low power setting).
+---
+ ic7100ctl/radio.py  | 22 ++++++++++++++++++----
+ tests/test_radio.py | 19 +++++++++++++++++++
+ 2 files changed, 37 insertions(+), 4 deletions(-)
+
+diff --git a/ic7100ctl/radio.py b/ic7100ctl/radio.py
+index 0a5015f..c18d10f 100644
+--- a/ic7100ctl/radio.py
++++ b/ic7100ctl/radio.py
+@@ -931,10 +931,24 @@ class IC7100:
+ 
+     def poll_meters_tx(self) -> None:
+         """TX meters — call this in a tight loop (~10 Hz) while transmitting
+-        so a GUI sees SSB drive in near-real-time."""
+-        self.get_po()
+-        self.get_swr()
+-        self.get_alc()
++        so a GUI sees SSB drive in near-real-time.
++
++        SSB output power flickers with every syllable, and a single read per
++        cycle mostly lands between syllables (Po read 0 for a whole 13 s
++        transmit). So Po is read between the other reads as well and the
++        cycle's PEAK is kept.
++        """
++        po_peak = 0
++        for other in (self.get_alc, self.get_swr, None):
++            v = self._read_meter(0x11)
++            if v is not None:
++                po_peak = max(po_peak, v)
++            if other is not None:
++                other()
++        v = self._read_meter(0x11)
++        if v is not None:
++            po_peak = max(po_peak, v)
++        self.po = po_peak
+ 
+     # -- Settings persistence (JSON, XDG path) --
+ 
+diff --git a/tests/test_radio.py b/tests/test_radio.py
+index a399a02..a7c9c60 100644
+--- a/tests/test_radio.py
++++ b/tests/test_radio.py
+@@ -217,3 +217,22 @@ class StaleTxMeterTests(unittest.TestCase):
+         t.set_response(0x1c, 0x00, b'\x1c\x00\x00')   # radio says: not transmitting
+         r.get_ptt()
+         self.assertEqual((r.transmitting, r.po), (False, 0))
++
++
++class PoPeakTests(unittest.TestCase):
++    def test_po_is_sampled_several_times_per_cycle_and_the_peak_kept(self):
++        t = MockCIVTransport(); r = IC7100(t)
++        po_values = iter([0, 91, 0, 40])                  # the four Po slots in one cycle
++        def fake(frame, timeout=None):
++            t.sent.append(frame)
++            if frame[4] == 0x15 and frame[5] == 0x11:
++                v = next(po_values)
++                return b'\x15\x11' + bytes([v // 100, ((v // 10 % 10) << 4) | (v % 10)])
++            return b'\xfb'
++        t.transact = fake
++        r.poll_meters_tx()
++        self.assertEqual(r.po, 91)                        # the peak, not the last sample
++        subs = [f[5] for f in t.sent if f[4] == 0x15]
++        self.assertEqual(subs.count(0x11), 4)
++        self.assertIn(0x12, subs)                         # SWR still read
++        self.assertIn(0x13, subs)                         # ALC still read
+-- 
+2.47.1
+

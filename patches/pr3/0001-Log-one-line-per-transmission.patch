@@ -1,0 +1,189 @@
+From 25924bba7439d1480930921c52da6f5cd76811d5 Mon Sep 17 00:00:00 2001
+From: "Brandon Barclay (AK6MJ)" <ak6mj@w7avm.org>
+Date: Thu, 8 Oct 2026 22:38:59 -0700
+Subject: [PATCH 1/4] Log one line per transmission
+
+When a transmission went wrong there was nothing in the log to look at:
+no record of what the radio was set to, or how hard it was driven.
+
+The radio now calls optional on_tx_start / on_tx_end hooks when the TX
+state flips (from set_ptt() or when get_ptt() notices a hand-mic key-up),
+tracks the highest Po, ALC and SWR reading seen during the transmit, and
+hands a summary to on_tx_end. The server prints one line from it:
+
+  [tx] 2.7 s on 3.7580 MHz LSB (DATA on, power set 10%) | peaks raw: Po 40 ALC 155 SWR 3
+
+A hook that raises is caught and reported, and never breaks CI-V.
+
+Used on an IC-7100 to tell a transmission that was driven properly from
+one that was not (ALC stayed near idle in one case).
+
+Tests: the hooks fire once each with the peaks (not the last values), a
+raising hook does not break PTT, and the server prints a single line.
+---
+ ic7100ctl/radio.py   | 42 ++++++++++++++++++++++++++++++++++++++++--
+ ic7100ctl/server.py  |  7 +++++++
+ tests/test_radio.py  | 28 ++++++++++++++++++++++++++++
+ tests/test_server.py | 15 +++++++++++++++
+ 4 files changed, 90 insertions(+), 2 deletions(-)
+
+diff --git a/ic7100ctl/radio.py b/ic7100ctl/radio.py
+index 6f2e282..b363509 100644
+--- a/ic7100ctl/radio.py
++++ b/ic7100ctl/radio.py
+@@ -230,6 +230,12 @@ class IC7100:
+         self.po: int = 0
+         self.swr: int = 0
+         self.alc: int = 0
++        # Optional hooks, called when a transmit starts / ends (the server logs a
++        # one-line summary from these). on_tx_end gets a dict, see _finish_tx().
++        self.on_tx_start = None
++        self.on_tx_end = None
++        self._tx_t0 = 0.0
++        self._tx_peaks = {}
+ 
+         # DATA mode (USB-D / FM-D / etc.) — controls which MOD INPUT the radio
+         # uses on TX. With DATA OFF MOD=MIC and DATA MOD=USB configured on
+@@ -370,9 +376,40 @@ class IC7100:
+         """Record the TX state. Po/SWR/ALC are only read while transmitting, so
+         they keep their last value in between; wipe them whenever the state
+         flips so a new key-up never starts by showing the previous transmit."""
+-        if bool(on) != self.transmitting:
++        on = bool(on)
++        if on != self.transmitting:
++            if on:
++                self._tx_t0 = time.monotonic()
++                self._tx_peaks = {'po': 0, 'alc': 0, 'swr': 0}
++                self._fire(self.on_tx_start, None)
++            else:
++                self._finish_tx()
+             self.po = self.swr = self.alc = 0
+-        self.transmitting = bool(on)
++        self.transmitting = on
++
++    def _note_tx_peaks(self) -> None:
++        pk = self._tx_peaks
++        if not pk:
++            return
++        for k, v in (('po', self.po), ('alc', self.alc), ('swr', self.swr)):
++            pk[k] = max(pk[k], v)
++
++    def _finish_tx(self) -> None:
++        """Summarise the transmit that just ended (raw 0-255 meter values)."""
++        summary = {'secs': time.monotonic() - self._tx_t0, 'freq_hz': self.freq_hz,
++                   'mode': self.mode, 'data_mode': self.data_mode,
++                   'rf_power': self.rf_power}
++        summary.update(self._tx_peaks)
++        self._fire(self.on_tx_end, summary)
++
++    @staticmethod
++    def _fire(cb, arg) -> None:
++        if cb is None:
++            return
++        try:
++            cb() if arg is None else cb(arg)
++        except Exception as e:          # a logging hook must never break CI-V
++            print(f"[radio] tx hook error: {e}", flush=True)
+ 
+     def get_ptt(self) -> Optional[bool]:
+         resp = self._txn(0x1c, subcmd=0x00)
+@@ -936,6 +973,7 @@ class IC7100:
+         self.get_po()
+         self.get_swr()
+         self.get_alc()
++        self._note_tx_peaks()
+ 
+     # -- Settings persistence (JSON, XDG path) --
+ 
+diff --git a/ic7100ctl/server.py b/ic7100ctl/server.py
+index e02142b..e6152ee 100644
+--- a/ic7100ctl/server.py
++++ b/ic7100ctl/server.py
+@@ -119,6 +119,7 @@ class RadioServer:
+         else:
+             self._connected = True
+ 
++        self.radio.on_tx_end = self._tx_ended       # one-line log per transmit
+         self._refresh_state()  # seed initial snapshot
+ 
+         self._poll_stop.clear()
+@@ -166,6 +167,12 @@ class RadioServer:
+ 
+     # ----- polling -----
+ 
++    def _tx_ended(self, s: dict) -> None:
++        """One log line per transmit: what actually went out."""
++        print(f"[tx] {s['secs']:.1f} s on {s['freq_hz'] / 1e6:.4f} MHz {s['mode']} "
++              f"(DATA {'on' if s['data_mode'] else 'off'}, power set {s['rf_power']}%) | "
++              f"peaks raw: Po {s['po']} ALC {s['alc']} SWR {s['swr']}", flush=True)
++
+     def _poll_loop(self) -> None:
+         t = getattr(self.radio, 't', None) or getattr(self.radio, 'transport', None)
+         if t is not None and hasattr(t, 'mark_poll_thread'):
+diff --git a/tests/test_radio.py b/tests/test_radio.py
+index a399a02..d6c54ca 100644
+--- a/tests/test_radio.py
++++ b/tests/test_radio.py
+@@ -144,6 +144,34 @@ class SmokeTests(unittest.TestCase):
+                             f"{name} missing or not callable")
+ 
+ 
++class TxSummaryHookTests(unittest.TestCase):
++    def test_hooks_fire_with_the_peaks_of_one_transmit(self):
++        t = MockCIVTransport(); r = IC7100(t)
++        started, ended = [], []
++        r.on_tx_start = lambda: started.append(1)
++        r.on_tx_end = ended.append
++        r.freq_hz, r.mode, r.rf_power = 3_758_000, 'LSB', 25
++        r.set_ptt(True)
++        self.assertEqual(started, [1])
++        for po, alc, swr in ((12, 40, 3), (58, 78, 5), (30, 20, 1)):
++            r.po, r.alc, r.swr = po, alc, swr
++            r._note_tx_peaks()
++        r.set_ptt(False)
++        self.assertEqual(len(ended), 1)
++        s = ended[0]
++        self.assertEqual((s['po'], s['alc'], s['swr']), (58, 78, 5))     # the peaks, not the last values
++        self.assertEqual((s['freq_hz'], s['mode'], s['rf_power']), (3_758_000, 'LSB', 25))
++        self.assertGreaterEqual(s['secs'], 0)
++        self.assertEqual((r.po, r.alc, r.swr), (0, 0, 0))                # and the meters are wiped as before
++
++    def test_a_broken_hook_never_breaks_ptt(self):
++        t = MockCIVTransport(); r = IC7100(t)
++        def boom(*a): raise RuntimeError('logging failed')
++        r.on_tx_start = boom; r.on_tx_end = boom
++        self.assertTrue(r.set_ptt(True))
++        self.assertTrue(r.set_ptt(False))
++
++
+ if __name__ == '__main__':
+     unittest.main()
+ 
+diff --git a/tests/test_server.py b/tests/test_server.py
+index 79c07a2..5727148 100644
+--- a/tests/test_server.py
++++ b/tests/test_server.py
+@@ -176,5 +176,20 @@ class InputActiveTests(unittest.TestCase):
+         self.assertFalse(server.state['input_active'])
+ 
+ 
++class TxLogLineTests(unittest.TestCase):
++    def test_one_line_per_transmit(self):
++        import contextlib, io
++        radio = IC7100(MockCIVTransport(civ_addr=0x88))
++        server = RadioServer(radio, host='127.0.0.1', port=_free_port())
++        s = dict(secs=2.7, freq_hz=3_758_000, mode='LSB', data_mode=True, rf_power=10, po=40, alc=155, swr=3)
++        out = io.StringIO()
++        with contextlib.redirect_stdout(out):
++            server._tx_ended(s)
++        line = out.getvalue()
++        self.assertEqual(line.count('\n'), 1)
++        self.assertIn('[tx] 2.7 s on 3.7580 MHz LSB (DATA on, power set 10%)', line)
++        self.assertIn('Po 40 ALC 155 SWR 3', line)
++
++
+ if __name__ == '__main__':
+     unittest.main()
+-- 
+2.47.1
+

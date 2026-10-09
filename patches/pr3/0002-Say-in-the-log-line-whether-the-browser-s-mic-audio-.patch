@@ -1,0 +1,228 @@
+From a19ee9dea4d6bcd5a449edcae324ea6dddd87b87 Mon Sep 17 00:00:00 2001
+From: "Brandon Barclay (AK6MJ)" <ak6mj@w7avm.org>
+Date: Thu, 8 Oct 2026 22:39:40 -0700
+Subject: [PATCH 2/4] Say in the log line whether the browser's mic audio
+ reached the radio
+
+In DATA mode the radio takes its modulation from the browser's microphone
+stream, so a transmission can be keyed, show normal-looking meters, and
+still carry no speech: the browser sent nothing (not started / no mic /
+wrong input), or sent digital silence. The log gave no hint which.
+
+For DATA-mode transmissions the [tx] line now adds how many mic frames the
+server received and how many it played to the radio during the transmit,
+and the peak level of the audio played (dBFS, or SILENT), with a warning
+when nothing audible reached the radio:
+
+  ... | browser mic frames: 189 received, 189 sent to the radio | mic peak -2 dBFS
+  ... | browser mic frames: 154 received, 154 sent to the radio | mic peak SILENT | WARNING: no mic audio reached the radio
+
+Hand-mic transmissions (DATA off) and servers without an audio bridge get
+no mic section, so there are no false warnings.
+
+On an IC-7100 this separated a mic that streamed frames of digital silence
+(a Bluetooth headset that had not woken up) from one that worked, which the
+meters alone could not.
+
+Tests cover the four cases; the PyAV test (run where PyAV is installed)
+checks that the peak and the frame counts come from the audio actually
+played. The server tests fail against the previous code.
+---
+ ic7100ctl/server.py  | 30 +++++++++++++++++++++++++-----
+ ic7100ctl/webrtc.py  |  8 +++++++-
+ tests/test_server.py | 42 ++++++++++++++++++++++++++++++++++++++++++
+ tests/test_webrtc.py | 30 ++++++++++++++++++++++++++++++
+ 4 files changed, 104 insertions(+), 6 deletions(-)
+
+diff --git a/ic7100ctl/server.py b/ic7100ctl/server.py
+index e6152ee..a34b1f9 100644
+--- a/ic7100ctl/server.py
++++ b/ic7100ctl/server.py
+@@ -35,6 +35,7 @@ inject a mock transport that quacks like `CIVTransport`.
+ from __future__ import annotations
+ 
+ import json
++import math
+ import mimetypes
+ import os
+ import threading
+@@ -119,7 +120,8 @@ class RadioServer:
+         else:
+             self._connected = True
+ 
+-        self.radio.on_tx_end = self._tx_ended       # one-line log per transmit
++        self.radio.on_tx_start = self._tx_started   # one-line log per transmit
++        self.radio.on_tx_end = self._tx_ended
+         self._refresh_state()  # seed initial snapshot
+ 
+         self._poll_stop.clear()
+@@ -167,11 +169,29 @@ class RadioServer:
+ 
+     # ----- polling -----
+ 
++    def _tx_started(self) -> None:
++        from . import webrtc
++        self._tx_frames0 = (webrtc._TX_STATE['n'], webrtc._TX_STATE['fwd'])
++        webrtc._TX_STATE['peak'] = 0
++
+     def _tx_ended(self, s: dict) -> None:
+-        """One log line per transmit: what actually went out."""
+-        print(f"[tx] {s['secs']:.1f} s on {s['freq_hz'] / 1e6:.4f} MHz {s['mode']} "
+-              f"(DATA {'on' if s['data_mode'] else 'off'}, power set {s['rf_power']}%) | "
+-              f"peaks raw: Po {s['po']} ALC {s['alc']} SWR {s['swr']}", flush=True)
++        """One log line per transmit: what actually went out and, in DATA mode
++        (where the browser's mic is the modulation source), whether that audio
++        reached the radio."""
++        line = (f"[tx] {s['secs']:.1f} s on {s['freq_hz'] / 1e6:.4f} MHz {s['mode']} "
++                f"(DATA {'on' if s['data_mode'] else 'off'}, power set {s['rf_power']}%) | "
++                f"peaks raw: Po {s['po']} ALC {s['alc']} SWR {s['swr']}")
++        if s['data_mode'] and self.webrtc_bridge is not None:
++            from . import webrtc
++            n0, f0 = getattr(self, '_tx_frames0', (0, 0))
++            got, fwd = webrtc._TX_STATE['n'] - n0, webrtc._TX_STATE['fwd'] - f0
++            pk = webrtc._TX_STATE['peak']
++            level = f"{20 * math.log10(pk / 32768):.0f} dBFS" if pk else 'SILENT'
++            line += (f" | browser mic frames: {got} received, {fwd} sent to the radio"
++                     f" | mic peak {level}")
++            if not (fwd and pk):
++                line += " | WARNING: no mic audio reached the radio"
++        print(line, flush=True)
+ 
+     def _poll_loop(self) -> None:
+         t = getattr(self.radio, 't', None) or getattr(self.radio, 'transport', None)
+diff --git a/ic7100ctl/webrtc.py b/ic7100ctl/webrtc.py
+index f0f2585..07e9c16 100644
+--- a/ic7100ctl/webrtc.py
++++ b/ic7100ctl/webrtc.py
+@@ -23,6 +23,7 @@ codec from the browser's mic is what the radio modulates.
+ """
+ from __future__ import annotations
+ 
++import array
+ import asyncio
+ import fractions
+ import threading
+@@ -91,7 +92,7 @@ class RxAudioTrack(MediaStreamTrack if AIORTC_AVAILABLE else object):
+ 
+ # Monotonic time of the last mic frame from any browser; read by the server to
+ # report whether TX audio is really arriving (see WebRTCBridge.mic_active).
+-_TX_STATE = {'t': 0.0}
++_TX_STATE = {'t': 0.0, 'n': 0, 'fwd': 0, 'peak': 0}   # last frame time; frames received / played; peak played
+ 
+ 
+ async def _consume_tx_track(track, playback: AlsaPlayback,
+@@ -115,6 +116,7 @@ async def _consume_tx_track(track, playback: AlsaPlayback,
+         except Exception:
+             break
+         _TX_STATE['t'] = time.monotonic()
++        _TX_STATE['n'] += 1
+         resampled_frames = resampler.resample(frame)
+         # PyAV ≥ 9 returns a list; older returns a single frame. Normalise.
+         if not isinstance(resampled_frames, list):
+@@ -125,6 +127,10 @@ async def _consume_tx_track(track, playback: AlsaPlayback,
+             if gate is not None and not gate():
+                 continue
+             buf = bytes(rf.planes[0])
++            _TX_STATE['fwd'] += 1
++            pcm = array.array('h')
++            pcm.frombytes(buf[:len(buf) & ~1])
++            _TX_STATE['peak'] = max(_TX_STATE['peak'], max(map(abs, pcm), default=0))
+             # aplay accepts arbitrary chunk sizes; no need to align to
+             # our 20 ms frame boundary.
+             playback.write_frame(buf)
+diff --git a/tests/test_server.py b/tests/test_server.py
+index 5727148..7d47a9a 100644
+--- a/tests/test_server.py
++++ b/tests/test_server.py
+@@ -176,6 +176,48 @@ class InputActiveTests(unittest.TestCase):
+         self.assertFalse(server.state['input_active'])
+ 
+ 
++class TxLogMicTests(unittest.TestCase):
++    """In DATA mode the log line says whether the browser's mic audio reached the radio."""
++    def _line(self, data_mode, frames_in, frames_fwd, peak, with_bridge=True):
++        import contextlib, io
++        from ic7100ctl import webrtc
++
++        class FakeBridge:
++            def mic_active(self): return True
++
++        radio = IC7100(MockCIVTransport(civ_addr=0x88))
++        server = RadioServer(radio, host='127.0.0.1', port=_free_port(),
++                             webrtc_bridge=FakeBridge() if with_bridge else None)
++        server._tx_started()
++        webrtc._TX_STATE['n'] += frames_in; webrtc._TX_STATE['fwd'] += frames_fwd
++        webrtc._TX_STATE['peak'] = peak
++        s = dict(secs=2.0, freq_hz=3_758_000, mode='LSB', data_mode=data_mode, rf_power=10, po=1, alc=2, swr=0)
++        out = io.StringIO()
++        with contextlib.redirect_stdout(out):
++            server._tx_ended(s)
++        return out.getvalue()
++
++    def test_audio_that_arrived_is_reported_with_its_level(self):
++        line = self._line(True, 100, 100, 16384)
++        self.assertIn('browser mic frames: 100 received, 100 sent to the radio', line)
++        self.assertIn('mic peak -6 dBFS', line)
++        self.assertNotIn('WARNING', line)
++
++    def test_silence_or_no_frames_is_flagged(self):
++        line = self._line(True, 100, 100, 0)
++        self.assertIn('mic peak SILENT', line)
++        self.assertIn('WARNING: no mic audio reached the radio', line)
++        self.assertIn('WARNING', self._line(True, 0, 0, 0))
++
++    def test_hand_mic_transmissions_do_not_warn(self):
++        line = self._line(False, 0, 0, 0)
++        self.assertNotIn('browser mic', line)
++        self.assertNotIn('WARNING', line)
++
++    def test_no_audio_bridge_means_no_mic_section(self):
++        self.assertNotIn('browser mic', self._line(True, 0, 0, 0, with_bridge=False))
++
++
+ class TxLogLineTests(unittest.TestCase):
+     def test_one_line_per_transmit(self):
+         import contextlib, io
+diff --git a/tests/test_webrtc.py b/tests/test_webrtc.py
+index bd9a1c6..2b68820 100644
+--- a/tests/test_webrtc.py
++++ b/tests/test_webrtc.py
+@@ -172,5 +172,35 @@ class MicActiveTests(unittest.TestCase):
+         self.assertFalse(webrtc.WebRTCBridge.mic_active(None))
+ 
+ 
++class TxPeakTests(unittest.TestCase):
++    def test_peak_of_audio_played_to_the_radio_is_tracked(self):
++        try:
++            import av
++        except ImportError:
++            self.skipTest('av not installed')
++        import struct
++        from ic7100ctl import webrtc
++
++        pcm = [0] * 960; pcm[100] = -12000                               # one loud sample
++        frame = av.AudioFrame(format='s16', layout='mono', samples=960); frame.sample_rate = 48000
++        frame.planes[0].update(struct.pack('<960h', *pcm))
++
++        class Track:
++            def __init__(self): self.n = 0
++            async def recv(self):
++                self.n += 1
++                if self.n > 1:
++                    raise RuntimeError('end')
++                return frame
++
++        class Sink:
++            def write_frame(self, b): pass
++
++        webrtc._TX_STATE.update(peak=0, n=0, fwd=0)
++        asyncio.run(webrtc._consume_tx_track(Track(), Sink(), asyncio.Event(), gate=lambda: True))
++        self.assertEqual(webrtc._TX_STATE['peak'], 12000)
++        self.assertEqual((webrtc._TX_STATE['n'], webrtc._TX_STATE['fwd']), (1, 1))
++
++
+ if __name__ == '__main__':
+     unittest.main()
+-- 
+2.47.1
+

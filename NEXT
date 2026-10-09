@@ -1,0 +1,24 @@
+NEXT (written 2026-10-08 night; read this first)
+
+STATE
+- Production panel on hex is running (deployed working copy, includes CESSB, PRE-EMPH, mic selector, radio-compressor controls).
+- Radio: 145.100 MHz FM, 100% power, mic gain 40%, on the real 2 m antenna.
+- THE DUMMY LOAD IS STILL ON THE HF ANTENNA PORT (user said so). Keep HF power <= 40% (load is 50 W) until the antenna is back.
+- Upstream: PR #1 OPEN (https://github.com/ukbodypilot/ic7100-remote/pull/1), no response yet. PR2/PR3/PR4 branches are on the fork
+  (bbarclay7/ic7100-remote) with NO PRs opened: open them (rebased on main) only after PR 1 gets a response, and only on the user's go.
+  Drafts: PR2/3/4-DESCRIPTION.md, patches in patches/pr1..pr4, plan in UPSTREAM-PLAN.md. PR5-7 not built.
+- Findings and caveats: FINDINGS-2026-10-08.md (read the CESSB sections), CHANGES.md, WINE_README.md (Winlink/VARA on hex).
+
+RESUME HERE (CESSB distortion test, not finished)
+1. Unproven: whether CESSB adds distortion in the radio / splatter. Average-level gain is solid (+2.1 dB at +12, +4.5 dB at +18 vs plain at
+   equal RECEIVED peak).
+2. Needs: a notched-noise or multi-tone test, or the radio's linear response removed before comparing; plus a wide RF capture (Whidbey Kiwi IQ
+   ~12 kHz, oss706.proxy.kiwisdr.com:8073) once the real antenna is back. Tools: sdr-tests/cessb-rf/ (gen.js, analyze_rf.py [waveform-match
+   metric is INVALID, use level/crest/band numbers], imd.py), hex:/tmp/play_tx.py (may need re-copying), hamtop1 ffmpeg.exe records the FT-710.
+3. Ideas not built: panel TX-trim control; CESSB filter edges 300-2700 / modelled on the radio's 281-2719 Hz passband; consider default CESSB off
+   until the distortion test is done. Reference to cite in docs: https://shop.rf.guru/pages/what-is-cessb
+4. Other open items: 2 m FM "very low" report (try PRE-EMPH on/off with another ham), RF gain on the radio, git mirror of the project to hex,
+   two-tone sweep at 100% power needs the real antenna (dummy load cannot take it).
+
+BEFORE ANY TRANSMIT TEST: ask the user, set the radio via the panel API (see memory notes), snapshot status first, restore after, and never
+use "pkill -f" patterns that match your own ssh command.

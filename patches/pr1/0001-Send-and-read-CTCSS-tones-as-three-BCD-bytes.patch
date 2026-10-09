@@ -1,0 +1,142 @@
+From 08d16015f71bd6658fb8c955db69f69ed2f493f0 Mon Sep 17 00:00:00 2001
+From: "Brandon Barclay (AK6MJ)" <ak6mj@w7avm.org>
+Date: Sat, 3 Oct 2026 19:21:08 -0700
+Subject: [PATCH 1/4] Send and read CTCSS tones as three BCD bytes
+
+1B 00 (repeater/TX tone) and 1B 01 (tone squelch) carry the frequency as
+three BCD bytes in tenths of Hz: 127.3 Hz is 00 12 73, in both directions.
+set_ctcss() sent two bytes, and get_ctcss() read the first two bytes of
+the three, so 127.3 Hz came back as 1.2 Hz and the CTCSS dropdowns never
+matched the radio.
+
+Checked on an IC-7100: wrote 100.0 Hz and 123.0 Hz, the radio's own
+read-back (polled seconds later) reported the new values, then restored
+the original 88.5 Hz.
+
+Adds tone_to_bcd3() and tests for both directions.
+---
+ ic7100ctl/civ.py    |  6 ++++++
+ ic7100ctl/radio.py  | 16 +++++++++-------
+ tests/test_civ.py   |  8 +++++++-
+ tests/test_radio.py | 21 +++++++++++++++++++++
+ 4 files changed, 43 insertions(+), 8 deletions(-)
+
+diff --git a/ic7100ctl/civ.py b/ic7100ctl/civ.py
+index 81e2e4b..ad97f56 100644
+--- a/ic7100ctl/civ.py
++++ b/ic7100ctl/civ.py
+@@ -58,6 +58,12 @@ def tone_to_bcd(hz: float) -> bytes:
+     return bytes([(d3 << 4) | d2, (d1 << 4) | d0])
+ 
+ 
++def tone_to_bcd3(hz: float) -> bytes:
++    """CTCSS tone as the radio's 3-byte BCD (tenths of Hz): 127.3 -> 00 12 73.
++    This is what 1B 00 / 1B 01 take and return."""
++    return b'\x00' + tone_to_bcd(hz)
++
++
+ def bcd_to_tone(data: bytes) -> float:
+     """Decode 2-byte BCD tone to Hz."""
+     hi = (data[0] >> 4) * 1000 + (data[0] & 0x0f) * 100
+diff --git a/ic7100ctl/radio.py b/ic7100ctl/radio.py
+index 26c37f7..d25593d 100644
+--- a/ic7100ctl/radio.py
++++ b/ic7100ctl/radio.py
+@@ -25,7 +25,7 @@ from typing import Optional
+ from .civ import (
+     CIVTransport, OK,
+     bcd3_to_value, bcd_to_freq, bcd_to_rit_offset, bcd_to_tone,
+-    freq_to_bcd, pct_to_bcd3, rit_offset_to_bcd, tone_to_bcd,
++    freq_to_bcd, pct_to_bcd3, rit_offset_to_bcd, tone_to_bcd3,
+ )
+ 
+ 
+@@ -416,12 +416,14 @@ class IC7100:
+ 
+     def get_ctcss(self):
+         """Read full CTCSS state. Returns (tx_hz, rx_hz, tx_on, rx_on)."""
++        # The radio answers with three BCD bytes (00 hh ll = tenths of Hz),
++        # e.g. 127.3 Hz -> 1B 00 00 12 73.
+         r = self._txn(0x1b, subcmd=0x00)            # TX tone freq
+-        if r and len(r) >= 4 and r[0] == 0x1b and r[1] == 0x00:
+-            self.ctcss_tx_hz = bcd_to_tone(r[2:4])
++        if r and len(r) >= 5 and r[0] == 0x1b and r[1] == 0x00:
++            self.ctcss_tx_hz = bcd_to_tone(r[3:5])
+         r = self._txn(0x1b, subcmd=0x01)            # RX tone squelch freq
+-        if r and len(r) >= 4 and r[0] == 0x1b and r[1] == 0x01:
+-            self.ctcss_rx_hz = bcd_to_tone(r[2:4])
++        if r and len(r) >= 5 and r[0] == 0x1b and r[1] == 0x01:
++            self.ctcss_rx_hz = bcd_to_tone(r[3:5])
+         r = self._txn(0x16, subcmd=0x43)            # TX tone encode enable
+         if r and len(r) >= 3 and r[0] == 0x16 and r[1] == 0x43:
+             self.ctcss_tx_on = bool(r[2])
+@@ -437,12 +439,12 @@ class IC7100:
+                   rx_on: Optional[bool] = None) -> bool:
+         ok = True
+         if tx_hz is not None:
+-            if self._set_ok(0x1b, subcmd=0x00, data=tone_to_bcd(tx_hz)):
++            if self._set_ok(0x1b, subcmd=0x00, data=tone_to_bcd3(tx_hz)):
+                 self.ctcss_tx_hz = tx_hz
+             else:
+                 ok = False
+         if rx_hz is not None:
+-            if self._set_ok(0x1b, subcmd=0x01, data=tone_to_bcd(rx_hz)):
++            if self._set_ok(0x1b, subcmd=0x01, data=tone_to_bcd3(rx_hz)):
+                 self.ctcss_rx_hz = rx_hz
+             else:
+                 ok = False
+diff --git a/tests/test_civ.py b/tests/test_civ.py
+index dead031..59f7042 100644
+--- a/tests/test_civ.py
++++ b/tests/test_civ.py
+@@ -5,7 +5,7 @@ import unittest
+ from ic7100ctl.civ import (
+     CIVTransport, PREAMBLE, END, CTRL_ADDR,
+     freq_to_bcd, bcd_to_freq,
+-    tone_to_bcd, bcd_to_tone,
++    tone_to_bcd, tone_to_bcd3, bcd_to_tone,
+     rit_offset_to_bcd, bcd_to_rit_offset,
+     pct_to_bcd3, bcd3_to_value,
+ )
+@@ -112,3 +112,9 @@ class FairnessFlagsTests(unittest.TestCase):
+ 
+ if __name__ == '__main__':
+     unittest.main()
++
++
++class ToneThreeByteTests(unittest.TestCase):
++    def test_tone_to_bcd3_has_a_leading_zero_byte(self):
++        self.assertEqual(tone_to_bcd3(127.3), b'\x00\x12\x73')
++        self.assertEqual(tone_to_bcd3(88.5), b'\x00\x08\x85')
+diff --git a/tests/test_radio.py b/tests/test_radio.py
+index 6ceca8b..4c2b51f 100644
+--- a/tests/test_radio.py
++++ b/tests/test_radio.py
+@@ -146,3 +146,24 @@ class SmokeTests(unittest.TestCase):
+ 
+ if __name__ == '__main__':
+     unittest.main()
++
++
++class CtcssFrequencyTests(unittest.TestCase):
++    """The radio takes and returns CTCSS tones as 3 BCD bytes (00 hh ll)."""
++
++    def setUp(self):
++        self.t = MockCIVTransport()
++        self.r = IC7100(self.t)
++
++    def test_set_sends_three_bytes(self):
++        self.assertTrue(self.r.set_ctcss(tx_hz=127.3))
++        self.assertEqual(self.t.last_frame()[4:9], b'\x1b\x00\x00\x12\x73')
++        self.assertTrue(self.r.set_ctcss(rx_hz=88.5))
++        self.assertEqual(self.t.last_frame()[4:9], b'\x1b\x01\x00\x08\x85')
++
++    def test_get_reads_three_bytes(self):
++        self.t.set_response(0x1b, 0x00, b'\x1b\x00\x00\x12\x73')
++        self.t.set_response(0x1b, 0x01, b'\x1b\x01\x00\x08\x85')
++        self.r.get_ctcss()
++        self.assertAlmostEqual(self.r.ctcss_tx_hz, 127.3)
++        self.assertAlmostEqual(self.r.ctcss_rx_hz, 88.5)
+-- 
+2.47.1
+

@@ -1,0 +1,14 @@
+.DS_Store
+__pycache__/
+*.pyc
+# big or private, kept out of git (local backups and downloads)
+/backup/
+/hex/
+/sd-build/
+# third-party clone; recordings regenerate from sdr-tests/cessb-rf/gen.js or are kept locally
+/sdr-tests/kiwiclient/
+/sdr-tests/kiwi_noname.txt
+*.wav
+*.f64
+/ic7100-remote/.git.upstream/
+/draft-*.md

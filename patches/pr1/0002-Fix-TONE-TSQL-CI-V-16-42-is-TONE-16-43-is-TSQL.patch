@@ -1,0 +1,289 @@
+From 3c31b3d39184b5109aabe03b9cd9ea5a4bad7066 Mon Sep 17 00:00:00 2001
+From: "Brandon Barclay (AK6MJ)" <ak6mj@w7avm.org>
+Date: Sat, 3 Oct 2026 19:21:55 -0700
+Subject: [PATCH 2/4] Fix TONE/TSQL: CI-V 16 42 is TONE, 16 43 is TSQL
+
+The code treated 16 43 as "TX tone encode" and 16 42 as "RX tone squelch",
+which is the wrong way round (Hamlib: S_FUNC_TONE 0x42, S_FUNC_TSQL 0x43).
+In the panel the CTCSS card's "on" box therefore switched TSQL on, and
+the FM Squelch card's TSQL button switched TONE on.
+
+Checked on an IC-7100: the head unit shows TONE when 16 42 reads 1 and
+TSQL when 16 43 reads 1; each switch is also set and read back through
+its own opcode. The radio treats the two as exclusive, so turning TSQL
+on also turns TONE off.
+
+The flags are now tone_on / tsql_on (radio, status JSON, panel). The old
+names stay as aliases, with the meaning their names always implied
+(ctcss_tx_on = TONE, ctcss_rx_on = TSQL):
+  - IC7100.ctcss_tx_on / ctcss_rx_on (read-only properties)
+  - set_ctcss(tx_on=, rx_on=) and the "ctcss" command's tx_on / rx_on
+  - ctcss_tx_on / ctcss_rx_on in the status JSON
+---
+ ic7100ctl/radio.py     | 54 +++++++++++++++++++++++++++++-------------
+ ic7100ctl/server.py    | 22 ++++++++++-------
+ ic7100ctl/web/panel.js |  4 ++--
+ tests/test_radio.py    | 31 ++++++++++++++++++++++++
+ tests/test_server.py   | 23 ++++++++++++++++++
+ 5 files changed, 107 insertions(+), 27 deletions(-)
+
+diff --git a/ic7100ctl/radio.py b/ic7100ctl/radio.py
+index d25593d..4fb3da7 100644
+--- a/ic7100ctl/radio.py
++++ b/ic7100ctl/radio.py
+@@ -201,8 +201,8 @@ class IC7100:
+         # Tone-squelch state
+         self.ctcss_tx_hz: float = 88.5
+         self.ctcss_rx_hz: float = 88.5
+-        self.ctcss_tx_on: bool = False
+-        self.ctcss_rx_on: bool = False
++        self.tone_on: bool = False      # CI-V 16 42: TONE (repeater tone encode)
++        self.tsql_on: bool = False      # CI-V 16 43: TSQL (tone squelch)
+         self.dtcs_on: bool = False
+         self.dtcs_code: int = 23
+         self.dtcs_polarity: int = 0      # 0..3 — see _DTCS_POLARITY
+@@ -415,7 +415,7 @@ class IC7100:
+     # -- CTCSS --
+ 
+     def get_ctcss(self):
+-        """Read full CTCSS state. Returns (tx_hz, rx_hz, tx_on, rx_on)."""
++        """Read full CTCSS state. Returns (tone_hz, tsql_hz, tone_on, tsql_on)."""
+         # The radio answers with three BCD bytes (00 hh ll = tenths of Hz),
+         # e.g. 127.3 Hz -> 1B 00 00 12 73.
+         r = self._txn(0x1b, subcmd=0x00)            # TX tone freq
+@@ -424,19 +424,30 @@ class IC7100:
+         r = self._txn(0x1b, subcmd=0x01)            # RX tone squelch freq
+         if r and len(r) >= 5 and r[0] == 0x1b and r[1] == 0x01:
+             self.ctcss_rx_hz = bcd_to_tone(r[3:5])
+-        r = self._txn(0x16, subcmd=0x43)            # TX tone encode enable
+-        if r and len(r) >= 3 and r[0] == 0x16 and r[1] == 0x43:
+-            self.ctcss_tx_on = bool(r[2])
+-        r = self._txn(0x16, subcmd=0x42)            # RX tone squelch enable
++        r = self._txn(0x16, subcmd=0x42)            # TONE (repeater tone) on/off
+         if r and len(r) >= 3 and r[0] == 0x16 and r[1] == 0x42:
+-            self.ctcss_rx_on = bool(r[2])
++            self.tone_on = bool(r[2])
++        r = self._txn(0x16, subcmd=0x43)            # TSQL (tone squelch) on/off
++        if r and len(r) >= 3 and r[0] == 0x16 and r[1] == 0x43:
++            self.tsql_on = bool(r[2])
+         return (self.ctcss_tx_hz, self.ctcss_rx_hz,
+-                self.ctcss_tx_on, self.ctcss_rx_on)
++                self.tone_on, self.tsql_on)
+ 
+     def set_ctcss(self, tx_hz: Optional[float] = None,
+                   rx_hz: Optional[float] = None,
++                  tone_on: Optional[bool] = None,
++                  tsql_on: Optional[bool] = None,
+                   tx_on: Optional[bool] = None,
+                   rx_on: Optional[bool] = None) -> bool:
++        """tx_hz = repeater tone (1B 00), rx_hz = tone-squelch tone (1B 01),
++        tone_on = TONE (16 42), tsql_on = TSQL (16 43).
++
++        tx_on / rx_on are the old names for tone_on / tsql_on, kept so
++        existing callers keep working."""
++        if tone_on is None:
++            tone_on = tx_on
++        if tsql_on is None:
++            tsql_on = rx_on
+         ok = True
+         if tx_hz is not None:
+             if self._set_ok(0x1b, subcmd=0x00, data=tone_to_bcd3(tx_hz)):
+@@ -448,20 +459,29 @@ class IC7100:
+                 self.ctcss_rx_hz = rx_hz
+             else:
+                 ok = False
+-        if tx_on is not None:
+-            if self._set_ok(0x16, subcmd=0x43,
+-                            data=bytes([0x01 if tx_on else 0x00])):
+-                self.ctcss_tx_on = tx_on
++        if tone_on is not None:
++            if self._set_ok(0x16, subcmd=0x42,
++                            data=bytes([0x01 if tone_on else 0x00])):
++                self.tone_on = tone_on
+             else:
+                 ok = False
+-        if rx_on is not None:
+-            if self._set_ok(0x16, subcmd=0x42,
+-                            data=bytes([0x01 if rx_on else 0x00])):
+-                self.ctcss_rx_on = rx_on
++        if tsql_on is not None:
++            if self._set_ok(0x16, subcmd=0x43,
++                            data=bytes([0x01 if tsql_on else 0x00])):
++                self.tsql_on = tsql_on
+             else:
+                 ok = False
+         return ok
+ 
++    # Old attribute names (the 16 42 / 16 43 meanings were swapped under them).
++    @property
++    def ctcss_tx_on(self) -> bool:
++        return self.tone_on
++
++    @property
++    def ctcss_rx_on(self) -> bool:
++        return self.tsql_on
++
+     # -- DTCS --
+ 
+     def set_dtcs_on(self, on: bool) -> bool:
+diff --git a/ic7100ctl/server.py b/ic7100ctl/server.py
+index 413c278..194f1d5 100644
+--- a/ic7100ctl/server.py
++++ b/ic7100ctl/server.py
+@@ -279,8 +279,11 @@ class RadioServer:
+             # CTCSS / DTCS
+             'ctcss_tx_hz':       float(getattr(r, 'ctcss_tx_hz', 0.0) or 0.0),
+             'ctcss_rx_hz':       float(getattr(r, 'ctcss_rx_hz', 0.0) or 0.0),
+-            'ctcss_tx_on':       bool(getattr(r, 'ctcss_tx_on', False)),
+-            'ctcss_rx_on':       bool(getattr(r, 'ctcss_rx_on', False)),
++            'tone_on':           bool(getattr(r, 'tone_on', False)),   # CI-V 16 42
++            'tsql_on':           bool(getattr(r, 'tsql_on', False)),   # CI-V 16 43
++            # Old names for the same two flags, kept for existing clients.
++            'ctcss_tx_on':       bool(getattr(r, 'tone_on', False)),
++            'ctcss_rx_on':       bool(getattr(r, 'tsql_on', False)),
+             'dtcs_on':           bool(getattr(r, 'dtcs_on', False)),
+             'dtcs_code':         int(getattr(r, 'dtcs_code', 23) or 23),
+             'dtcs_polarity':     int(getattr(r, 'dtcs_polarity', 0) or 0),
+@@ -313,7 +316,7 @@ class RadioServer:
+             'tx_port':           None,
+             'rx_boost_pct':      100,
+             'squelch_type':      ('dtcs' if getattr(r, 'dtcs_on', False)
+-                                  else ('tsql' if getattr(r, 'ctcss_rx_on', False)
++                                  else ('tsql' if getattr(r, 'tsql_on', False)
+                                         else 'noise')),
+             # Pack a derived settings sub-dict too — handy for clients that
+             # want one blob to persist to disk.
+@@ -577,11 +580,14 @@ def _cmd_atten(r, p):
+ 
+ 
+ def _cmd_ctcss(r, p):
+-    # Combined-fields panel command — set any/all of tx_hz/rx_hz/tx_on/rx_on.
++    # Combined-fields panel command — set any/all of tx_hz (repeater tone),
++    # rx_hz (tone-squelch tone), tone_on (TONE), tsql_on (TSQL). tx_on and
++    # rx_on are accepted as the old names for tone_on / tsql_on.
+     if 'hz' in p and 'tx_hz' not in p:
+         p['tx_hz'] = p['hz']  # tolerate spec wording
+     ok = r.set_ctcss(tx_hz=p.get('tx_hz'), rx_hz=p.get('rx_hz'),
+-                     tx_on=p.get('tx_on'), rx_on=p.get('rx_on'))
++                     tone_on=p.get('tone_on', p.get('tx_on')),
++                     tsql_on=p.get('tsql_on', p.get('rx_on')))
+     return _ok() if ok else _fail('set_ctcss NG')
+ 
+ 
+@@ -630,15 +636,15 @@ def _cmd_raw(r, p):
+ def _cmd_squelch_type(r, p):
+     t = (p.get('type') or '').lower()
+     if t == 'noise':
+-        r.set_ctcss(rx_on=False)
++        r.set_ctcss(tsql_on=False)
+         r.set_dtcs_on(False)
+         return _ok({'squelch_type': 'noise'})
+     if t == 'tsql':
+         r.set_dtcs_on(False)
+-        r.set_ctcss(rx_on=True)
++        r.set_ctcss(tsql_on=True)
+         return _ok({'squelch_type': 'tsql'})
+     if t == 'dtcs':
+-        r.set_ctcss(rx_on=False)
++        r.set_ctcss(tsql_on=False)
+         r.set_dtcs_on(True)
+         return _ok({'squelch_type': 'dtcs'})
+     return _fail('squelch_type: type must be noise|tsql|dtcs')
+diff --git a/ic7100ctl/web/panel.js b/ic7100ctl/web/panel.js
+index 6c84f03..5be9d58 100644
+--- a/ic7100ctl/web/panel.js
++++ b/ic7100ctl/web/panel.js
+@@ -681,7 +681,7 @@ function icCtcssApply(which) {
+   if (which === 'tx') {
+     var hz = parseFloat(document.getElementById('ic-ctcss-tx').value);
+     var on = document.getElementById('ic-ctcss-tx-on').checked;
+-    icCmd('ctcss', {tx_hz: isNaN(hz) ? 0 : hz, tx_on: on});
++    icCmd('ctcss', {tx_hz: isNaN(hz) ? 0 : hz, tone_on: on});
+   } else {
+     var hzR = parseFloat(document.getElementById('ic-ctcss-rx').value);
+     icCmd('ctcss', {rx_hz: isNaN(hzR) ? 0 : hzR});
+@@ -884,7 +884,7 @@ function pollStatus() {
+     });
+     var txOnBox = document.getElementById('ic-ctcss-tx-on');
+     if (txOnBox && document.activeElement !== txOnBox) {
+-      txOnBox.checked = !!s.ctcss_tx_on;
++      txOnBox.checked = !!s.tone_on;
+     }
+ 
+     // HF panel sync
+diff --git a/tests/test_radio.py b/tests/test_radio.py
+index 4c2b51f..99977be 100644
+--- a/tests/test_radio.py
++++ b/tests/test_radio.py
+@@ -167,3 +167,34 @@ class CtcssFrequencyTests(unittest.TestCase):
+         self.r.get_ctcss()
+         self.assertAlmostEqual(self.r.ctcss_tx_hz, 127.3)
+         self.assertAlmostEqual(self.r.ctcss_rx_hz, 88.5)
++
++
++class ToneAndTsqlTests(unittest.TestCase):
++    """CI-V 16 42 is TONE, 16 43 is TSQL (they were wired the other way round)."""
++
++    def setUp(self):
++        self.t = MockCIVTransport()
++        self.r = IC7100(self.t)
++
++    def test_tone_on_uses_16_42(self):
++        self.assertTrue(self.r.set_ctcss(tone_on=True))
++        self.assertEqual(self.t.last_frame()[4:7], b'\x16\x42\x01')
++        self.assertTrue(self.r.tone_on and not self.r.tsql_on)
++
++    def test_tsql_on_uses_16_43(self):
++        self.assertTrue(self.r.set_ctcss(tsql_on=True))
++        self.assertEqual(self.t.last_frame()[4:7], b'\x16\x43\x01')
++        self.assertTrue(self.r.tsql_on and not self.r.tone_on)
++
++    def test_get_reads_each_flag_from_its_own_opcode(self):
++        self.t.set_response(0x16, 0x42, b'\x16\x42\x01')   # TONE on
++        self.t.set_response(0x16, 0x43, b'\x16\x43\x00')   # TSQL off
++        self.r.get_ctcss()
++        self.assertEqual((self.r.tone_on, self.r.tsql_on), (True, False))
++
++    def test_old_names_still_work(self):
++        self.r.set_ctcss(tx_on=True)                          # old name for TONE
++        self.assertEqual(self.t.last_frame()[4:6], b'\x16\x42')
++        self.r.set_ctcss(rx_on=True)                          # old name for TSQL
++        self.assertEqual(self.t.last_frame()[4:6], b'\x16\x43')
++        self.assertEqual((self.r.ctcss_tx_on, self.r.ctcss_rx_on), (True, True))
+diff --git a/tests/test_server.py b/tests/test_server.py
+index b5be938..f4552d9 100644
+--- a/tests/test_server.py
++++ b/tests/test_server.py
+@@ -93,6 +93,29 @@ class ServerSmokeTests(unittest.TestCase):
+         self.assertEqual(atten_frames[0][5], 0x12,
+                          "Atten on must send 0x11 0x12, not 0x11 0x20")
+ 
++    def test_squelch_type_tsql_switches_tsql_not_tone(self):
++        before = self.transport.cmd_count()
++        r = self._post_json('/ic7100cmd', {'cmd': 'squelch_type', 'type': 'tsql'})
++        self.assertTrue(r['ok'])
++        sent = [bytes(f[4:7]) for f in self.transport.sent[before:] if f[4] == 0x16]
++        self.assertIn(b'\x16\x43\x01', sent)          # TSQL on
++        self.assertNotIn(b'\x16\x42\x01', sent)       # not TONE
++        st = self._get_json('/ic7100/status')
++        self.assertTrue(st['tsql_on'])
++        self.assertEqual(st['squelch_type'], 'tsql')
++        self._post_json('/ic7100cmd', {'cmd': 'squelch_type', 'type': 'noise'})
++        self.assertFalse(self._get_json('/ic7100/status')['tsql_on'])
++
++    def test_ctcss_command_accepts_new_and_old_flag_names(self):
++        before = self.transport.cmd_count()
++        self._post_json('/ic7100cmd', {'cmd': 'ctcss', 'tone_on': True})
++        self._post_json('/ic7100cmd', {'cmd': 'ctcss', 'rx_on': True})      # old name for TSQL
++        sent = [bytes(f[4:7]) for f in self.transport.sent[before:] if f[4] == 0x16]
++        self.assertEqual(sent, [b'\x16\x42\x01', b'\x16\x43\x01'])
++        st = self._get_json('/ic7100/status')
++        self.assertEqual((st['tone_on'], st['tsql_on']), (True, True))
++        self.assertEqual((st['ctcss_tx_on'], st['ctcss_rx_on']), (True, True))  # old keys, same flags
++
+     def test_post_mode(self):
+         r = self._post_json('/ic7100cmd', {'cmd': 'mode', 'mode': 'FM'})
+         self.assertTrue(r['ok'])
+-- 
+2.47.1
+

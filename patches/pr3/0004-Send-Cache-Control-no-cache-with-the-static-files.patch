@@ -1,0 +1,50 @@
+From 6b8966baebf2920f25efe9d7d929ce02ff333201 Mon Sep 17 00:00:00 2001
+From: "Brandon Barclay (AK6MJ)" <ak6mj@w7avm.org>
+Date: Thu, 8 Oct 2026 22:40:32 -0700
+Subject: [PATCH 4/4] Send Cache-Control: no-cache with the static files
+
+The panel's HTML, JS and CSS carried no cache header, so after an update
+a plain reload kept running the old page until the browser decided to
+revalidate. With no-cache the browser asks every time (and gets a
+normal 200 for the small files).
+
+The test fetches / and /web/panel.js and checks the header. It fails
+against the previous code.
+---
+ ic7100ctl/server.py  | 2 ++
+ tests/test_server.py | 6 ++++++
+ 2 files changed, 8 insertions(+)
+
+diff --git a/ic7100ctl/server.py b/ic7100ctl/server.py
+index 38e8411..a694b82 100644
+--- a/ic7100ctl/server.py
++++ b/ic7100ctl/server.py
+@@ -857,6 +857,8 @@ def _make_handler(server: RadioServer):
+                 self.send_response(200)
+                 self.send_header('Content-Type', ctype)
+                 self.send_header('Content-Length', str(len(body)))
++                # Revalidate every load so a redeploy shows up on a plain reload.
++                self.send_header('Cache-Control', 'no-cache')
+                 self.end_headers()
+                 self.wfile.write(body)
+             except (BrokenPipeError, ConnectionResetError):
+diff --git a/tests/test_server.py b/tests/test_server.py
+index 43aeee3..2842b46 100644
+--- a/tests/test_server.py
++++ b/tests/test_server.py
+@@ -133,6 +133,12 @@ class ServerSmokeTests(unittest.TestCase):
+             del self.transport.consecutive_timeouts
+             self.server._refresh_state()
+ 
++    def test_static_files_are_revalidated_on_every_load(self):
++        for path in ('/', '/web/panel.js'):
++            with urllib.request.urlopen(f'{self.base}{path}', timeout=2) as r:
++                self.assertEqual(r.status, 200, path)
++                self.assertEqual(r.headers.get('Cache-Control'), 'no-cache', path)
++
+     def test_post_mode(self):
+         r = self._post_json('/ic7100cmd', {'cmd': 'mode', 'mode': 'FM'})
+         self.assertTrue(r['ok'])
+-- 
+2.47.1
+

@@ -1,0 +1,133 @@
+From 21520b613e45c3583dac0beacd9d00f0612ad473 Mon Sep 17 00:00:00 2001
+From: "Brandon Barclay (AK6MJ)" <ak6mj@w7avm.org>
+Date: Thu, 8 Oct 2026 22:32:47 -0700
+Subject: [PATCH 2/4] Only play the browser's mic audio while the radio is
+ keyed
+
+The browser streams its microphone continuously once audio is started,
+and every frame was written to the codec's playback buffer whether or not
+the radio was transmitting. In receive that audio is never heard, so it
+just queues in aplay's buffer, and the first words of the next
+transmission are old audio.
+
+_consume_tx_track() now takes an optional gate and drops frames while it
+returns False; the bridge passes one that follows radio.transmitting.
+
+This went in together with the non-blocking playback change while chasing
+garbled RX audio with the mic stream on on an IC-7100; I have not
+measured the gate's effect separately from that change.
+
+The tests check the gate follows the radio's flag, and (with PyAV
+installed) that only a frame that arrives while the gate is open reaches
+the codec. Both fail against the previous code.
+---
+ ic7100ctl/webrtc.py  | 16 ++++++++++++++--
+ tests/test_webrtc.py | 40 ++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 54 insertions(+), 2 deletions(-)
+
+diff --git a/ic7100ctl/webrtc.py b/ic7100ctl/webrtc.py
+index 3c6bfc4..481b9cc 100644
+--- a/ic7100ctl/webrtc.py
++++ b/ic7100ctl/webrtc.py
+@@ -89,12 +89,17 @@ class RxAudioTrack(MediaStreamTrack if AIORTC_AVAILABLE else object):
+ 
+ 
+ async def _consume_tx_track(track, playback: AlsaPlayback,
+-                            stop: asyncio.Event):
++                            stop: asyncio.Event, gate=None):
+     """Pull s16 audio frames from the browser's mic and play them.
+ 
+     aiortc decodes incoming Opus → AudioFrame. The frame may not be at
+     our target sample rate or layout, so we resample to 48 kHz mono s16
+     using PyAV's AudioResampler.
++
++    If *gate* is given, frames are only played while it returns True (the
++    radio is keyed). Otherwise the mic audio would just pile up in the
++    codec's playback buffer, and the first words of a transmission would
++    be old audio.
+     """
+     resampler = av.AudioResampler(format='s16', layout='mono',
+                                   rate=SAMPLE_RATE)
+@@ -110,6 +115,8 @@ async def _consume_tx_track(track, playback: AlsaPlayback,
+         for rf in resampled_frames:
+             if rf is None:
+                 continue
++            if gate is not None and not gate():
++                continue
+             buf = bytes(rf.planes[0])
+             # aplay accepts arbitrary chunk sizes; no need to align to
+             # our 20 ms frame boundary.
+@@ -139,6 +146,10 @@ class WebRTCBridge:
+         self._stop = asyncio.Event()
+         self._started = threading.Event()
+ 
++    def _tx_gate(self) -> bool:
++        """True while the radio is keyed: only then is browser mic audio played."""
++        return bool(getattr(self.radio, 'transmitting', False))
++
+     def start(self) -> None:
+         if self._thread:
+             return
+@@ -210,7 +221,8 @@ class WebRTCBridge:
+         def on_track(track):
+             if track.kind == "audio":
+                 task = asyncio.ensure_future(
+-                    _consume_tx_track(track, self.playback, consumer_stop))
++                    _consume_tx_track(track, self.playback, consumer_stop,
++                                      gate=self._tx_gate))
+                 self._consumer_tasks.append(task)
+ 
+         @pc.on("connectionstatechange")
+diff --git a/tests/test_webrtc.py b/tests/test_webrtc.py
+index 1061899..0ff27a3 100644
+--- a/tests/test_webrtc.py
++++ b/tests/test_webrtc.py
+@@ -123,5 +123,45 @@ class WebRTCBridgeTests(unittest.TestCase):
+             srv.stop()
+ 
+ 
++class TxGateTests(unittest.TestCase):
++    def test_gate_follows_the_radios_transmitting_flag(self):
++        import types
++        from ic7100ctl import webrtc
++        bridge = types.SimpleNamespace(radio=types.SimpleNamespace(transmitting=False))
++        self.assertFalse(webrtc.WebRTCBridge._tx_gate(bridge))
++        bridge.radio.transmitting = True
++        self.assertTrue(webrtc.WebRTCBridge._tx_gate(bridge))
++
++    def test_mic_audio_is_played_only_while_the_gate_is_open(self):
++        try:
++            import av
++        except ImportError:
++            self.skipTest('av not installed')
++        import struct
++        from ic7100ctl import webrtc
++
++        frame = av.AudioFrame(format='s16', layout='mono', samples=960)
++        frame.sample_rate = 48000
++        frame.planes[0].update(struct.pack('<960h', *([1000] * 960)))
++
++        class Track:
++            def __init__(self): self.n = 0
++            async def recv(self):
++                self.n += 1
++                if self.n > 3:
++                    raise RuntimeError('end')
++                return frame
++
++        class Sink:
++            def __init__(self): self.frames = 0
++            def write_frame(self, b): self.frames += 1
++
++        opens = iter([False, True, False])
++        sink = Sink()
++        asyncio.run(webrtc._consume_tx_track(Track(), sink, asyncio.Event(),
++                                             gate=lambda: next(opens)))
++        self.assertEqual(sink.frames, 1)       # only the frame that arrived while keyed
++
++
+ if __name__ == '__main__':
+     unittest.main()
+-- 
+2.47.1
+

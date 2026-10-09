@@ -1,0 +1,2 @@
+2026-10-08: long session. Fixed dead audio pipes + wrong-mic display; handset mic gain set to 40%; CESSB, PRE-EMPH, mic selector, radio-compressor controls added; PR1 opened upstream (#1), PR2-4 built on the fork; CESSB RF test stages 1-2 into the dummy load (see FINDINGS-2026-10-08.md, NEXT).
+- 2026-10-09: 100 W CESSB series done (stage 4), METHOD.md written (sdr-tests/cessb-rf/), panel restored, radio back on 145.100 FM 100% mic 40. ssh alias hex fixed to 192.168.8.183. Recommendation: CESSB +12 default, +18 optional; awaiting another ham's A/B.

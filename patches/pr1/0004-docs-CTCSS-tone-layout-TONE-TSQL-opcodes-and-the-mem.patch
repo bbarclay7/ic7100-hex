@@ -1,0 +1,85 @@
+From f4675e04440787b2dc5dfe1212ea17d5f63d78c7 Mon Sep 17 00:00:00 2001
+From: "Brandon Barclay (AK6MJ)" <ak6mj@w7avm.org>
+Date: Sat, 3 Oct 2026 19:23:11 -0700
+Subject: [PATCH 4/4] docs: CTCSS tone layout, TONE/TSQL opcodes, and the
+ memory banks
+
+- 1B 00 / 1B 01 carry the tone as three BCD bytes (00 hh ll).
+- 16 42 is TONE and 16 43 is TSQL (they were listed the other way round);
+  on the IC-7100 the two are exclusive.
+- The IC-7100 does have memory banks A-E. 08 A0 [2-byte BCD bank] selects
+  one, counted from 1 (00 04 selects D). A bare 08 A0 is answered with NG.
+  protocol.md and two comments in radio.py said the radio had no banks /
+  that 08 A0 selects "Bank A".
+
+All of this was checked against a real IC-7100. Comments and docs only.
+---
+ docs/protocol.md   | 19 +++++++++++--------
+ ic7100ctl/radio.py |  7 ++++---
+ 2 files changed, 15 insertions(+), 11 deletions(-)
+
+diff --git a/docs/protocol.md b/docs/protocol.md
+index 759a8ec..5f2f555 100644
+--- a/docs/protocol.md
++++ b/docs/protocol.md
+@@ -74,10 +74,10 @@ Manual page references (where given) are to the IC-7100 Full Manual.
+ 
+ | Symbolic name | Opcode | Manual | Notes |
+ |---|---|---|---|
+-| `set/get CTCSS TX freq` | `0x1B 0x00` | — | 2-byte BCD tenths-of-Hz (e.g. 88.5 -> `08 85`). |
+-| `set/get CTCSS RX freq` | `0x1B 0x01` | — | Same encoding. |
+-| `set/get CTCSS TX on` | `0x16 0x43` | — | 1 byte flag. |
+-| `set/get CTCSS RX on` | `0x16 0x42` | — | 1 byte flag. |
++| `set/get repeater (TX) tone freq` | `0x1B 0x00` | — | **3-byte** BCD tenths of Hz, `00 hh ll`: 127.3 Hz is `00 12 73`. The reply has the same layout. |
++| `set/get tone-squelch freq` | `0x1B 0x01` | — | Same encoding. |
++| `set/get TONE on` | `0x16 0x42` | — | 1 byte flag. Repeater tone encode ("TONE" on the display). |
++| `set/get TSQL on` | `0x16 0x43` | — | 1 byte flag. Tone squelch ("TSQL" on the display). On the IC-7100 TONE and TSQL are exclusive: switching one on switches the other off. |
+ 
+ ### DTCS
+ 
+@@ -209,10 +209,13 @@ To select a CALL channel, issue `0x08 [hi_bcd] [lo_bcd]` with the channel
+ number — exactly like any other memory channel. There is no separate CALL
+ opcode group.
+ 
+-`0x08 0xA0` is **Memory Bank A select** on radios that have memory banks.
+-Earlier code used `0x08 0xA0` thinking it was the call-channel selector;
+-the IC-7100 in fact doesn't have user-visible memory banks so the
+-behavior was nondeterministic.
++The IC-7100 does have memory banks (A-E). `0x08 0xA0 [bank]` selects one,
++where `bank` is a 2-byte BCD number **counted from 1**: A is `00 01`, E is
++`00 05`, and `00 04` selects D. A bare `0x08 0xA0` with no bank is answered
++with NG, and no command that reads back the active bank is known, so a client
++has to remember what it last selected. Earlier code used `0x08 0xA0` as a
++CALL-channel selector; the CALL channels are just memory channels 106-109
++(above).
+ 
+ ### 4. Main / Sub band opcodes
+ 
+diff --git a/ic7100ctl/radio.py b/ic7100ctl/radio.py
+index 0a5015f..6f2e282 100644
+--- a/ic7100ctl/radio.py
++++ b/ic7100ctl/radio.py
+@@ -8,7 +8,8 @@ non-obvious parts that justify a dedicated library:
+   0x20 like the IC-7300/7610. Earlier guesses NG'd the radio.
+ * 0x0A = Memory-to-VFO, 0x0B = Memory clear. Earlier code had these swapped.
+ * CALL channels are memory channels 106-109 (144-C1, 144-C2, 430-C1, 430-C2);
+-  the older 0x08 0xA0 opcode actually selects Memory Bank A.
++  the older 0x08 0xA0 opcode is not a CALL selector: it selects a memory bank
++  (A-E, numbered from 1) and needs the bank number as data.
+ * 0x07 0xD0/0xD1 (Main/Sub band) is for dual-receiver radios (IC-9100). The
+   IC-7100 is single-receiver and has no such concept — opcodes removed.
+ """
+@@ -849,8 +850,8 @@ class IC7100:
+         With no argument, picks the right band-1 call channel based on the
+         current frequency: <300 MHz -> 144-C1, else 430-C1.
+ 
+-        Earlier code used 0x08 0xA0, which actually selects Memory Bank A —
+-        the IC-7100's CALL channels are memory channels 106-109.
++        Earlier code used 0x08 0xA0, which selects a memory bank rather than a
++        CALL channel — the IC-7100's CALL channels are memory channels 106-109.
+         """
+         if not which:
+             which = '144-C1' if (self.freq_hz or 0) < 300_000_000 else '430-C1'
+-- 
+2.47.1
+

@@ -1,0 +1,140 @@
+From 452ee96b086b8829798cc134cb16118a55fe16f4 Mon Sep 17 00:00:00 2001
+From: "Brandon Barclay (AK6MJ)" <ak6mj@w7avm.org>
+Date: Thu, 8 Oct 2026 22:42:37 -0700
+Subject: [PATCH 1/3] PTT: hold-to-talk keepalives, and unkey by itself when
+ they stop
+
+The "ptt" command toggles the transmitter. A page that keys the radio on
+button-down and unkeys it on button-up leaves the radio keyed if the
+unkey never arrives (the tab closes, Wi-Fi drops, the browser freezes).
+
+Add an optional hold mode: {"cmd":"ptt","state":true,"hold":true} keys
+the radio and sets a deadline 1.5 s ahead; the page re-sends the same
+command every ~500 ms while the button is held, and each one pushes the
+deadline out. A server watchdog thread unkeys the radio when the deadline
+passes without a keepalive. A command without "hold" behaves as before
+and clears the deadline.
+
+Two details that matter for safety:
+- A keepalive that arrives after the release ({"hold":true,"keepalive":
+  true} while not transmitting) never re-keys the radio, so a delayed
+  request cannot undo the unkey.
+- A keepalive for a radio that is already keyed only extends the deadline
+  and sends nothing to the radio.
+
+Tests (mock transport): a late keepalive sends no key frame; two hold
+commands send one key frame, and after the timeout the watchdog sends the
+unkey. Both fail against the previous code.
+---
+ ic7100ctl/radio.py   |  1 +
+ ic7100ctl/server.py  | 27 +++++++++++++++++++++++++++
+ tests/test_server.py | 25 +++++++++++++++++++++++++
+ 3 files changed, 53 insertions(+)
+
+diff --git a/ic7100ctl/radio.py b/ic7100ctl/radio.py
+index b363509..02cd267 100644
+--- a/ic7100ctl/radio.py
++++ b/ic7100ctl/radio.py
+@@ -236,6 +236,7 @@ class IC7100:
+         self.on_tx_end = None
+         self._tx_t0 = 0.0
+         self._tx_peaks = {}
++        self._ptt_deadline: Optional[float] = None   # hold-to-talk: unkey after this (server watchdog)
+ 
+         # DATA mode (USB-D / FM-D / etc.) — controls which MOD INPUT the radio
+         # uses on TX. With DATA OFF MOD=MIC and DATA MOD=USB configured on
+diff --git a/ic7100ctl/server.py b/ic7100ctl/server.py
+index a694b82..c3aad3c 100644
+--- a/ic7100ctl/server.py
++++ b/ic7100ctl/server.py
+@@ -128,12 +128,25 @@ class RadioServer:
+         self._poll_thread = threading.Thread(
+             target=self._poll_loop, name='ic7100-poll', daemon=True)
+         self._poll_thread.start()
++        threading.Thread(target=self._ptt_watchdog, name='ic7100-ptt-wd',
++                         daemon=True).start()
+ 
+         handler = _make_handler(self)
+         self._httpd = ThreadingHTTPServer((self.host, self.port), handler)
+         print(f"[RadioServer] Listening on http://{self.host}:{self.port}",
+               flush=True)
+ 
++    def _ptt_watchdog(self) -> None:
++        """Unkey if hold-to-talk keepalives stop arriving."""
++        while not self._poll_stop.wait(0.25):
++            r = self.radio
++            dl = getattr(r, '_ptt_deadline', None)
++            if dl is not None and time.monotonic() > dl:
++                r._ptt_deadline = None
++                if getattr(r, 'transmitting', False):
++                    print("[RadioServer] PTT hold lapsed, unkeying", flush=True)
++                    r.set_ptt(False)
++
+     def serve_forever(self) -> None:
+         if self._httpd is None:
+             raise RuntimeError("start() must be called before serve_forever()")
+@@ -472,11 +485,25 @@ def _tx_only(r, attr: str) -> int:
+     return int(getattr(r, attr, 0) or 0) if getattr(r, 'transmitting', False) else 0
+ 
+ 
++PTT_HOLD_TIMEOUT = 1.5  # s without a hold keepalive before auto-unkey
++
++
+ def _cmd_ptt(r, p):
+     if 'state' in p:
+         on = bool(p['state'])
+     else:
+         on = not bool(getattr(r, 'transmitting', False))
++    if on and p.get('hold'):
++        # Hold-to-talk: the page re-sends this every ~500 ms while the button
++        # (or Space) is held; the watchdog unkeys if the keepalives stop
++        # (tab closed, network drop), so the radio can never stay keyed.
++        if p.get('keepalive') and not getattr(r, 'transmitting', False):
++            return _ok({'ptt': False})   # late keepalive after release: never re-key
++        r._ptt_deadline = time.monotonic() + PTT_HOLD_TIMEOUT
++        if getattr(r, 'transmitting', False):
++            return _ok({'ptt': True})    # keepalive only, already keyed
++    else:
++        r._ptt_deadline = None
+     ok = r.set_ptt(on)
+     return _ok({'ptt': on}) if ok else _fail('set_ptt NG')
+ 
+diff --git a/tests/test_server.py b/tests/test_server.py
+index 2842b46..5828d6e 100644
+--- a/tests/test_server.py
++++ b/tests/test_server.py
+@@ -139,6 +139,31 @@ class ServerSmokeTests(unittest.TestCase):
+                 self.assertEqual(r.status, 200, path)
+                 self.assertEqual(r.headers.get('Cache-Control'), 'no-cache', path)
+ 
++    def test_late_keepalive_does_not_rekey(self):
++        def key_frames():
++            return [f for f in self.transport.sent
++                    if f[4] == 0x1c and f[5] == 0x00 and f[6] == 0x01]
++        self.assertFalse(self.radio.transmitting)
++        n = len(key_frames())
++        r = self._post_json('/ic7100cmd', {'cmd': 'ptt', 'state': True, 'hold': True, 'keepalive': True})
++        self.assertTrue(r['ok'])
++        self.assertFalse(self.radio.transmitting)
++        self.assertEqual(len(key_frames()), n)   # nothing was sent to key the radio
++
++    def test_ptt_hold_unkeys_when_keepalives_stop(self):
++        def ptt_frames():
++            # key/unkey frames carry a data byte; the poller's reads (1c 00 FD) don't
++            return [f for f in self.transport.sent
++                    if f[4] == 0x1c and f[5] == 0x00 and f[6] in (0x00, 0x01)]
++        n = len(ptt_frames())
++        self._post_json('/ic7100cmd', {'cmd': 'ptt', 'state': True, 'hold': True})
++        self._post_json('/ic7100cmd', {'cmd': 'ptt', 'state': True, 'hold': True})
++        self.assertTrue(self.radio.transmitting)
++        self.assertEqual(len(ptt_frames()) - n, 1)  # keepalive does not re-key
++        time.sleep(2.2)  # PTT_HOLD_TIMEOUT 1.5 s + watchdog tick
++        self.assertFalse(self.radio.transmitting)
++        self.assertEqual(len(ptt_frames()) - n, 2)  # key + auto-unkey
++
+     def test_post_mode(self):
+         r = self._post_json('/ic7100cmd', {'cmd': 'mode', 'mode': 'FM'})
+         self.assertTrue(r['ok'])
+-- 
+2.47.1
+

@@ -1,0 +1,12 @@
+# cp config.example config.env, fill in, then: ./make-sd.sh /dev/diskN
+PI_HOSTNAME=ic7100
+PI_USER=bb
+PI_SSH_PUBKEY="ssh-ed25519 AAAA... you@mac"
+WIFI_SSID="your-ssid"
+WIFI_PSK="your-wifi-password"
+WIFI_COUNTRY=US
+TIMEZONE=America/Los_Angeles
+# Tailscale admin console -> Settings -> Keys: single-use, short expiry
+TS_AUTHKEY="tskey-auth-..."
+# yes = panel also reachable from the home LAN (no auth!). no = tailnet only.
+LAN_PANEL=yes

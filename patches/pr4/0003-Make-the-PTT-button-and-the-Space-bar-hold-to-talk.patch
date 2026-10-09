@@ -1,0 +1,127 @@
+From 65637339ed409825bc406d5bbd3cfcd6ac164fcc Mon Sep 17 00:00:00 2001
+From: "Brandon Barclay (AK6MJ)" <ak6mj@w7avm.org>
+Date: Thu, 8 Oct 2026 22:43:52 -0700
+Subject: [PATCH 3/3] Make the PTT button, and the Space bar, hold-to-talk
+
+The PTT button toggled the transmitter on each click, so a missed second
+click left the radio keyed. It now transmits only while held.
+
+- Pointer down keys the radio ({"ptt", state:true, hold:true}); the page
+  then sends a keepalive every 500 ms; pointer up, pointer cancel, losing
+  pointer capture, the window losing focus, or the tab being hidden all
+  release. Requests are strictly ordered, so a release can never overtake
+  the key-down, and at most one keepalive is queued.
+- The Space bar does the same, but not while typing in a field. Key
+  auto-repeat is ignored and its default action (scrolling the page) is
+  suppressed.
+- The button looks pressed immediately and goes back if the radio refuses.
+- If the browser has no microphone (see "RX only, NO MIC") keying shows the
+  reason instead of silently transmitting a carrier with nothing on it.
+
+The server side is the watchdog from the previous commits: if the page
+dies mid-transmit, the radio unkeys within about 1.5 s.
+
+Checked in headless Chrome against this branch's own files and a mock
+radio, logging what the page sends: holding the button for 1.3 s sent one
+key-down, two keepalives and one release, then nothing; Space with an
+auto-repeat sent one key-down, keepalives and one release; a window blur
+while keyed released; Space inside a text field sent nothing. I have not
+yet exercised this exact branch on the radio.
+---
+ ic7100ctl/web/index.html |  2 +-
+ ic7100ctl/web/panel.js   | 69 ++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 70 insertions(+), 1 deletion(-)
+
+diff --git a/ic7100ctl/web/index.html b/ic7100ctl/web/index.html
+index 3118e8c..a0dd622 100644
+--- a/ic7100ctl/web/index.html
++++ b/ic7100ctl/web/index.html
+@@ -101,7 +101,7 @@
+         </div>
+       </div>
+       <div class="ic-spacer"></div>
+-      <button class="rb" onclick="icCmd('ptt')" id="ic-ptt-btn" title="Toggle transmit">PTT</button>
++      <button class="rb" id="ic-ptt-btn" title="Hold to transmit (or hold the Space bar); release to stop">PTT (hold)</button>
+     </div>
+     <!-- Tune-step row (TX antenna-port safety interlock row above this in
+          the gateway version was removed — see project notes; safety
+diff --git a/ic7100ctl/web/panel.js b/ic7100ctl/web/panel.js
+index 7857246..ac90d28 100644
+--- a/ic7100ctl/web/panel.js
++++ b/ic7100ctl/web/panel.js
+@@ -1114,3 +1114,72 @@ if (document.readyState === 'loading') {
+     else startAudio();
+   });
+ })();
++
++
++// ── Hold-to-talk PTT ────────────────────────────────────────────────────
++// Press and hold to transmit. Keepalives every 500 ms; the server unkeys by
++// itself if they stop. Any loss of focus/visibility/pointer releases.
++(function () {
++  var btn = document.getElementById('ic-ptt-btn');
++  if (!btn) return;
++  var held = false, timer = null, kaPending = false;
++  // Requests go out strictly in order (a release can never overtake the key-down),
++  // and at most one keepalive is queued at a time.
++  var chain = Promise.resolve();
++  function send(on, keepalive) {
++    var body = {cmd: 'ptt', state: on, hold: on};
++    if (keepalive) body.keepalive = true;   // server never re-keys on a keepalive
++    chain = chain.then(function () { return icPost(body); }).catch(function () {});
++    return chain;
++  }
++  function start() {
++    if (held) return;
++    held = true;
++    if (window._micOk === false) {          // keying works, but nothing will modulate it
++      icFeedback('No mic: ' + window._micWhy, true);
++    }
++    btn.classList.add('active');            // immediate feedback
++    send(true).then(function (d) {          // refused (e.g. radio error): drop the held look
++      if (d && d.ok === false) btn.classList.remove('active');
++    });
++    timer = setInterval(function () {
++      if (kaPending) return;
++      kaPending = true;
++      send(true, true).then(function () { kaPending = false; });
++    }, 500);
++  }
++  function stop() {
++    if (!held) return;
++    held = false;
++    clearInterval(timer); timer = null;
++    send(false).then(pollStatus);
++  }
++  function down(e) {
++    e.preventDefault();
++    try { btn.setPointerCapture(e.pointerId); } catch (_) {}
++    start();
++  }
++  btn.addEventListener('pointerdown', down);
++  btn.addEventListener('pointerup', stop);
++  btn.addEventListener('pointercancel', stop);
++  btn.addEventListener('lostpointercapture', stop);
++  btn.addEventListener('contextmenu', function (e) { e.preventDefault(); });
++  window.addEventListener('blur', stop);
++  document.addEventListener('visibilitychange', function () { if (document.hidden) stop(); });
++
++  // Space bar = PTT while held (not while typing in a field).
++  function typing() {
++    var a = document.activeElement;
++    return a && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName));
++  }
++  document.addEventListener('keydown', function (e) {
++    if (e.code !== 'Space' || typing()) return;
++    e.preventDefault();  // always, incl. auto-repeats, or the page scrolls while held
++    if (!e.repeat) start();
++  });
++  document.addEventListener('keyup', function (e) {
++    if (e.code !== 'Space') return;
++    e.preventDefault();
++    stop();
++  });
++})();
+-- 
+2.47.1
+

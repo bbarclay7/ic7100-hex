@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IC-7100 Control</title>
+<link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='2' fill='%230b1014'/><text x='8' y='11' text-anchor='middle' font-family='monospace' font-size='9' font-weight='700' fill='%234fd6e6'>7</text></svg>">
+<link rel="stylesheet" href="/web/panel.css">
+</head>
+<body>
+
+<h1>IC-7100 <span class="h1-sub">control panel</span> <a class="h1-link" href="/classic">classic layout</a></h1>
+
+<!-- Offline state ------------------------------------------------------- -->
+<div id="ic-offline" class="ic-offline" style="display:none;">
+  <div class="head">
+    <span class="msg">IC-7100 Not Connected</span>
+    <span id="ic-status-detail" class="detail"></span>
+  </div>
+  <div class="checklist">
+    <div>
+      <span id="ic-chk-civ" class="dot pending">&#x25cf;</span>
+      CI-V Serial: <span id="ic-chk-civ-text" class="ic-val dim">checking...</span>
+    </div>
+    <div>
+      <span id="ic-chk-audio" class="dot pending">&#x25cf;</span>
+      USB Audio: <span id="ic-chk-audio-text" class="ic-val dim">checking...</span>
+    </div>
+  </div>
+</div>
+
+<!-- Main panel ---------------------------------------------------------- -->
+<div id="ic-panel" style="display:none;">
+
+  <!-- Status bar: CI-V + audio + VFO + TX badge.
+       (Stripped vs the gateway version: no endpoint name, no mute pill,
+       no HF/VHF TX interlock dots.) -->
+  <div class="ic-bar">
+    <button id="ic-radio-power" class="cessb-btn" type="button" disabled><span class="cessb-led"></span><span class="cessb-txt">POWER</span></button>
+    <span class="ic-label">CI-V:</span> <span id="ic-civ-state" class="ic-val">&mdash;</span>
+    <span class="sep">|</span>
+    <span class="ic-label">Audio:</span> <span id="ic-audio-state" class="ic-val">&mdash;</span>
+    <button id="ic-preemph" class="cessb-btn on" type="button"><span class="cessb-led"></span><span class="cessb-txt">PRE-EMPH</span></button>
+    <button id="ic-cessb" class="cessb-btn on" type="button"><span class="cessb-led"></span><span class="cessb-txt">CESSB</span></button>
+    <span id="ic-mic-dead" style="display:none;color:#e55;font-weight:bold" title="The microphone is delivering digital silence">MIC DEAD</span>
+    <span id="ic-mic-meter" title="Microphone level" style="display:inline-block;width:60px;height:8px;background:var(--ic-track,#333);border-radius:2px;vertical-align:middle;overflow:hidden"><span style="display:block;height:100%;width:0;background:#4c4"></span></span>
+    <select id="ic-mic-dev" class="ic-select" style="max-width:14em" title="Microphone the browser sends. Changing it while audio is running restarts the audio."></select>
+    <span id="ic-audio-stats" class="ic-val dim" title="WebRTC receive health as your browser sees it"></span>
+    <button id="ic-audio-toggle" class="rb-sm" type="button" style="margin-left:6px"
+            title="Start/stop WebRTC audio">Start audio</button>
+    <audio id="ic-audio-rx" autoplay playsinline></audio>
+    <span class="ic-spacer"></span>
+    <span id="ic-tx-badge" class="ic-tx-badge">TX</span>
+    <span id="ic-feedback" class="ic-val dim"></span>
+  </div>
+
+  <!-- VFO card: big freq display + band shortcuts + mode buttons + meter + PTT -->
+  <div class="ic-card">
+    <div class="ic-row">
+      <span class="ic-label" style="min-width:60px">VFO:</span>
+      <div class="ic-btn-row" id="ic-vfo-row">
+        <button class="rb rb-sm" data-vfo="A" onclick="icCmd('vfo', {vfo:'A'})" title="Select VFO A">VFO A</button>
+        <button class="rb rb-sm" data-vfo="B" onclick="icCmd('vfo', {vfo:'B'})" title="Select VFO B">VFO B</button>
+        <button class="rb rb-sm" onclick="icCmd('vfo_swap')" title="Exchange VFO A and B">Swap</button>
+        <button class="rb rb-sm" onclick="icCmd('vfo_equalize')" title="Copy active VFO to inactive (A=B)">A=B</button>
+      </div>
+    </div>
+    <div class="ic-row">
+      <span class="ic-label" style="min-width:60px">Memory:</span>
+      <button class="rb rb-sm" id="ic-mem-toggle" onclick="toggleMemoryMode()" title="Toggle VFO / Memory mode">MEM</button>
+      <button class="rb rb-sm ic-mem-danger" onclick="writeMemory()" title="Overwrite memory channel with current VFO">Write</button>
+      <button class="rb rb-sm ic-mem-danger" onclick="clearMemory()" title="Clear memory channel">Clear</button>
+      <span class="ic-label">Ch:</span>
+      <input id="ic-mem-ch" class="ic-input" type="number" min="1" max="99" step="1" value="1"
+             style="width:5em" title="Memory channel 1–99"
+             onchange="selectMemoryChannel()">
+      <span class="ic-label">Bank:</span>
+      <div class="ic-btn-row" id="ic-bank-row">
+        <button class="rb rb-sm" data-bank="A" onclick="selectMemoryBank('A')" title="Select memory bank A">A</button>
+        <button class="rb rb-sm" data-bank="B" onclick="selectMemoryBank('B')" title="Select memory bank B">B</button>
+        <button class="rb rb-sm" data-bank="C" onclick="selectMemoryBank('C')" title="Select memory bank C">C</button>
+        <button class="rb rb-sm" data-bank="D" onclick="selectMemoryBank('D')" title="Select memory bank D">D</button>
+        <button class="rb rb-sm" data-bank="E" onclick="selectMemoryBank('E')" title="Select memory bank E">E</button>
+      </div>
+      <span id="ic-bank-state" class="ic-label"></span>
+      <button class="rb rb-sm" onclick="icCmd('call_channel')" title="Select dedicated CALL channel">CALL</button>
+      <button class="rb rb-sm" onclick="icCmd('memory_to_vfo')" title="Copy memory channel to VFO">M&rarr;V</button>
+    </div>
+    <!-- Head-unit style display: mode / tone / filter on top, frequency,
+         memory name, annunciators, meters; MEMO/bank-channel and PTT at right. -->
+    <!-- Phones only (hidden on desktop): frequency readout that stays at the top of the screen. -->
+    <div id="ic-mini" class="ic-mini">
+      <span id="ic-mini-mode" class="ic-mini-mode">&mdash;</span>
+      <span id="ic-mini-freq" class="ic-mini-freq">0.000.000</span>
+      <span id="ic-mini-info" class="ic-mini-info"></span>
+    </div>
+    <div class="lcd-wrap">
+      <div class="lcd-left">
+        
+        <div class="knob-wrap md pot"
+             title="RF gain, 0–100%. Turn it down on strong HF signals. Drag or scroll to set; double-click for 100%.">
+          <div class="knob-dial">
+            <div class="knob-base"></div>
+            <div class="knob-arc"></div>
+            <div id="ic-rf-knob" class="knob pot"></div>
+            <div class="knob-gloss"></div>
+          </div>
+          <div id="ic-rf-knob-cap" class="knob-cap">RF Gain 100%</div>
+        </div>
+        <div class="knob-wrap md pot"
+             title="Squelch threshold, 0–100% (0 = open, mainly FM). Drag to set; double-click for 20%. Centre LED lights green while squelch is open.">
+          <div class="knob-dial">
+            <div class="knob-base"></div>
+            <div class="knob-arc"></div>
+            <div id="ic-squelch-knob" class="knob pot"></div>
+            <div class="knob-gloss"></div>
+            <div id="ic-squelch-led" class="knob-led" title="Green when squelch open"></div>
+          </div>
+          <div id="ic-squelch-knob-cap" class="knob-cap">Sql 0%</div>
+        </div>
+        <div class="lcd-ptt">
+          <button class="rb ptt-btn" id="ic-ptt-btn" title="Hold to transmit (or hold Spacebar); release to stop">
+            <span class="trx-legend" aria-hidden="true"><span class="tx">TX</span><span class="rx">RX</span></span>
+            <span id="ic-trx-lamp" class="trx-lamp" title="Dark: squelched. Green: receiving. Red: transmitting."></span>
+            <span class="ptt-text">HOLD<br>TO TALK</span>
+            <span class="ptt-sub">or SPACEBAR</span>
+          </button>
+        </div>
+        <div class="knob-wrap md pot"
+             title="TX RF output power, 0–100%. Drag to set; double-click to zero.">
+          <div class="knob-dial">
+            <div class="knob-base"></div>
+            <div class="knob-arc"></div>
+            <div id="ic-pwr-knob" class="knob pot"></div>
+            <div class="knob-gloss"></div>
+            <div id="ic-pwr-led" class="knob-led" title="Red while transmitting"></div>
+          </div>
+          <div id="ic-pwr-knob-cap" class="knob-cap">PWR 0%</div>
+        </div>
+        
+      </div>
+      <div class="lcd" id="ic-lcd">
+        <div class="lcd-main">
+          <div class="lcd-top">
+          <div class="lcd-box lcd-tap" role="button" tabindex="0" title="Tap to change mode" onclick="openModeMenu(this)"><span id="ic-mode-cur" class="ic-mode-big">&mdash;</span></div>
+          <div id="ic-tone-ind" class="ic-tone-ind lcd-tone"></div>
+          <div class="lcd-box lcd-fil lcd-tap" role="button" tabindex="0" title="Tap to change filter" onclick="openFilterMenu(this)">FIL<span id="ic-filter-cur">&mdash;</span></div>
+        </div>
+          <div class="ic-freq-wrap">
+          <div id="ic-freq" class="ic-freq-display" tabindex="0"
+               title="Click a digit then mouse-wheel or ↑/↓ to step. ←/→ move position."></div>
+          <div id="ic-mem-name" class="ic-mem-name"></div>
+        </div>
+          <div id="ic-lcd-status" class="lcd-status"></div>
+    <div class="ic-row">
+      <span class="ic-label">S-meter:</span>
+      <div class="ic-smeter-wrap" title="Receive signal strength">
+        <div id="ic-smeter-fill" class="ic-smeter-fill"></div>
+        <div class="ic-smeter-ticks"></div>
+      </div>
+      <span id="ic-smeter-val" class="ic-val" style="min-width:3em;text-align:right">0</span>
+    </div>
+        <div class="ic-row">
+      <span class="ic-label" title="TX power output">Po:</span>
+      <div class="ic-smeter-wrap" title="TX power output">
+        <div id="ic-po-fill" class="ic-txm-fill po"></div>
+        <div class="ic-smeter-ticks"></div>
+      </div>
+      <span id="ic-po-val" class="ic-val" style="min-width:3.5em;text-align:right">0%</span>
+    </div>
+    <div class="ic-row">
+      <span class="ic-label" title="ALC — keep out of the red when setting SSB drive">ALC:</span>
+      <div class="ic-smeter-wrap" title="ALC level">
+        <div id="ic-alc-fill" class="ic-txm-fill alc"></div>
+        <div class="ic-smeter-ticks"></div>
+      </div>
+      <span id="ic-alc-val" class="ic-val" style="min-width:3.5em;text-align:right">0%</span>
+    </div>
+    <div class="ic-row">
+      <span class="ic-label" title="Antenna SWR — measured while transmitting">SWR:</span>
+      <div class="ic-smeter-wrap" title="SWR — measured while transmitting">
+        <div id="ic-swr-fill" class="ic-txm-fill swr"></div>
+        <div class="ic-smeter-ticks"></div>
+      </div>
+      <span id="ic-swr-val" class="ic-val" style="min-width:3.5em;text-align:right">&mdash;</span>
+    </div>
+    <div class="ic-row">
+      <span class="ic-label" title="Speech compressor level">COMP:</span>
+      <div class="ic-smeter-wrap" title="Speech compressor level, 0-20 dB (TX only)">
+        <div id="ic-comp-fill" class="ic-txm-fill alc"></div>
+        <div class="ic-smeter-ticks"></div>
+      </div>
+      <span id="ic-comp-val" class="ic-val" style="min-width:3.5em;text-align:right">0 dB</span>
+    </div>
+    <div class="ic-row">
+      <span class="ic-label" title="PA drain current">ID:</span>
+      <div class="ic-smeter-wrap" title="PA drain current, 0-25 A (TX only)">
+        <div id="ic-id-fill" class="ic-txm-fill po"></div>
+        <div class="ic-smeter-ticks"></div>
+      </div>
+      <span id="ic-id-val" class="ic-val" style="min-width:3.5em;text-align:right">0 A</span>
+    </div>
+    <div class="ic-row">
+      <span class="ic-label" title="PA drain voltage">Vd:</span>
+      <div class="ic-smeter-wrap" title="Supply voltage, 10-16 V">
+        <div id="ic-vd-fill" class="ic-txm-fill vd"></div>
+        <div class="ic-smeter-ticks"></div>
+      </div>
+      <span id="ic-vd-val" class="ic-val" style="min-width:3.5em;text-align:right">&mdash;</span>
+    </div>
+      
+          <div class="lcd-memo-box">
+            <div class="lcd-memo" id="ic-memo" role="button" tabindex="0" onclick="toggleVfoMem()">
+          <div id="ic-memo-cap" class="lcd-memo-cap">&nbsp;</div>
+          <div id="ic-memo-id" class="lcd-memo-id">&nbsp;</div>
+        </div>
+            <div class="lcd-chstep" id="ic-chstep" title="Previous / next programmed memory in this bank (or scroll over here)">
+          <button class="rb rb-sm" onclick="memStep(-1)">&#9664;</button>
+          <button class="rb rb-sm" onclick="memStep(1)">&#9654;</button>
+        </div>
+          </div>
+        </div>
+      </div>
+      <div class="lcd-knobs">
+        <div class="ic-row lcd-enter">
+          <span class="ic-label">Enter:</span>
+          <input id="ic-freq-typed" class="ic-input" type="text" inputmode="decimal"
+                 placeholder="MHz" style="width:6.5em"
+                 title="Type a frequency in MHz, then press Enter or tap Set. tip: 14.2 → 14.200 MHz; 14200 → 14.200 MHz">
+          <button class="rb rb-sm" onclick="applyTypedFreq()">Set</button>
+        </div>
+        <div class="knob-wrap"
+             title="VFO tuning knob — drag to spin. Spin slow for fine steps, fast to cover ground. One detent = the highlighted frequency digit.">
+          <div class="knob-dial">
+            <div class="knob-base"></div>
+            <div id="ic-vfo-knob" class="knob"></div>
+            <div class="knob-gloss"></div>
+          </div>
+          <div id="ic-vfo-knob-cap" class="knob-cap">VFO</div>
+        </div>
+        <div class="knob-wrap sm"
+             title="RIT offset knob — drag to spin. Gentle profile; one detent = the highlighted RIT digit.">
+          <div class="knob-dial">
+            <div class="knob-base"></div>
+            <div id="ic-rit-knob" class="knob"></div>
+            <div class="knob-gloss"></div>
+          </div>
+          <div id="ic-rit-knob-cap" class="knob-cap">RIT</div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Tune-step row (TX antenna-port safety interlock row above this in
+         the gateway version was removed — see project notes; safety
+         belongs to the antenna plant, not a software toggle). -->
+    <div class="ic-row" style="margin-top: calc(-1 * var(--s-2));">
+      <span class="ic-label" style="min-width:60px">Step:</span>
+      <div class="ic-tune-steps" id="ic-tune-steps"></div>
+
+    </div>
+    <div class="ic-row">
+      <span class="ic-label">Band:</span>
+      <div class="ic-btn-row" id="ic-band-row"></div>
+    </div>
+    
+  </div>
+
+  <div class="ic-grid-2">
+    <!-- CTCSS card -->
+    <div class="ic-card">
+      <div class="ic-card-title">CTCSS</div>
+      <div class="ic-row">
+        <label class="ic-label" style="min-width:80px">TX tone:</label>
+        <select id="ic-ctcss-tx" class="ic-select"
+                title="Repeater (TX) tone frequency, sent to the radio when you press Apply. The box turns the radio's TONE on or off."></select>
+        <button class="rb rb-sm" onclick="icCtcssApply('tx')">Apply</button>
+        <label><input type="checkbox" id="ic-ctcss-tx-on"> on</label>
+      </div>
+      <div class="ic-row">
+        <label class="ic-label" style="min-width:80px">RX tone:</label>
+        <select id="ic-ctcss-rx" class="ic-select"
+                title="Tone-squelch (RX) tone frequency. TSQL itself is switched in the FM Squelch card."></select>
+        <button class="rb rb-sm" onclick="icCtcssApply('rx')">Apply</button>
+      </div>
+    </div>
+
+    <!-- FM Squelch card -->
+    <div class="ic-card">
+      <div class="ic-card-title">FM Squelch</div>
+      <div class="ic-row">
+        <span class="ic-label" style="min-width:80px">Type:</span>
+        <div class="ic-btn-row" id="ic-sqltype-row">
+          <button class="rb rb-sm" data-sqltype="noise"
+                  onclick="icCmd('squelch_type', {type:'noise'})"
+                  title="Carrier/noise squelch — opens on any signal">Noise</button>
+          <button class="rb rb-sm" data-sqltype="tsql"
+                  onclick="icCmd('squelch_type', {type:'tsql'})"
+                  title="Tone squelch — opens only on matching CTCSS tone (set RX tone above)">TSQL</button>
+          <button class="rb rb-sm" data-sqltype="dtcs"
+                  onclick="icCmd('squelch_type', {type:'dtcs'})"
+                  title="Digital tone code squelch — opens only on matching DTCS code">DTCS</button>
+        </div>
+      </div>
+      <div class="ic-row">
+        <label class="ic-label" style="min-width:80px">DTCS code:</label>
+        <select id="ic-dtcs-code" class="ic-select"
+                onchange="icCmd('dtcs', {code: +this.value})"
+                title="DTCS code (octal) — applies when type is DTCS"></select>
+        <label class="ic-label">Polarity:</label>
+        <select id="ic-dtcs-pol" class="ic-select"
+                onchange="icCmd('dtcs', {polarity: +this.value})"
+                title="DTCS TX/RX polarity">
+          <option value="0">TN-RN (normal)</option>
+          <option value="1">TN-RR</option>
+          <option value="2">TR-RN</option>
+          <option value="3">TR-RR (both rev)</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- HF Panel — RIT/XIT, AGC, NB/NR, preamp/atten, IF shift, filter ----- -->
+  <details class="ic-card" open>
+    <summary class="ic-card-title" style="cursor:pointer">HF Controls</summary>
+
+    <div class="ic-row" style="margin-top: var(--s-2)">
+      <span class="ic-label" style="min-width:60px">VFO:</span>
+      <label><input type="checkbox" id="ic-split-on" onchange="icCmd('split', {on: this.checked})"> Split</label>
+      <span class="sep">|</span>
+      <label><input type="checkbox" id="ic-rit-on"  onchange="icCmd('rit', {on: this.checked})"> RIT</label>
+      <div id="ic-rit-hz" class="ic-freq-display" tabindex="0"
+           style="font-size: 1.4em; min-width: unset; padding: 0 var(--s-2);"
+           title="Click a digit then mouse-wheel or ↑/↓ to step. ←/→ move position. Click ± to toggle sign."></div>
+      <span class="ic-label">Hz</span>
+      <button class="rb rb-sm" onclick="_setRitHz(0)" title="Clear RIT offset to 0">Clr</button>
+      <span class="sep">|</span>
+      <label><input type="checkbox" id="ic-xit-on" onchange="icCmd('xit', {on: this.checked})"> XIT</label>
+    </div>
+
+    <div class="ic-row">
+      <span class="ic-label" style="min-width:60px">AGC:</span>
+      <div class="ic-btn-row" id="ic-agc-row">
+        <button class="rb rb-sm" data-agc="fast" onclick="icCmd('agc', {mode:'fast'})">Fast</button>
+        <button class="rb rb-sm" data-agc="mid"  onclick="icCmd('agc', {mode:'mid'})">Mid</button>
+        <button class="rb rb-sm" data-agc="slow" onclick="icCmd('agc', {mode:'slow'})">Slow</button>
+      </div>
+      <span class="sep">|</span>
+      <span class="ic-label">Preamp:</span>
+      <div class="ic-btn-row" id="ic-preamp-row">
+        <button class="rb rb-sm" data-preamp="0" onclick="icCmd('preamp', {stage:0})">Off</button>
+        <button class="rb rb-sm" data-preamp="1" onclick="icCmd('preamp', {stage:1})">P1</button>
+        <button class="rb rb-sm" data-preamp="2" onclick="icCmd('preamp', {stage:2})">P2</button>
+      </div>
+      <span class="sep">|</span>
+      <label><input type="checkbox" id="ic-atten-on"
+                    onchange="icCmd('atten', {on: this.checked})"> Atten 20 dB</label>
+    </div>
+
+    <div class="ic-row">
+      <span class="ic-label" style="min-width:60px">NB:</span>
+      <label><input type="checkbox" id="ic-nb-on" onchange="icCmd('nb', {on: this.checked})"> on</label>
+      <input id="ic-nb-level" type="range" min="0" max="100" step="1" value="50" class="ic-slider"
+             style="max-width:160px"
+             oninput="document.getElementById('ic-nb-level-val').textContent = this.value + '%'"
+             onchange="icCmd('nb', {level: +this.value})">
+      <span id="ic-nb-level-val" class="ic-slider-val">50%</span>
+      <span class="sep">|</span>
+      <span class="ic-label">NR:</span>
+      <label><input type="checkbox" id="ic-nr-on" onchange="icCmd('nr', {on: this.checked})"> on</label>
+      <input id="ic-nr-level" type="range" min="0" max="100" step="1" value="50" class="ic-slider"
+             style="max-width:160px"
+             oninput="document.getElementById('ic-nr-level-val').textContent = this.value + '%'"
+             onchange="icCmd('nr', {level: +this.value})">
+      <span id="ic-nr-level-val" class="ic-slider-val">50%</span>
+    </div>
+
+    <div class="ic-row">
+      <span class="ic-label" style="min-width:60px">Filter:</span>
+      <div class="ic-btn-row" id="ic-filter-row">
+        <button class="rb rb-sm" data-filter="1" onclick="icCmd('filter', {idx:1})">FIL1</button>
+        <button class="rb rb-sm" data-filter="2" onclick="icCmd('filter', {idx:2})">FIL2</button>
+        <button class="rb rb-sm" data-filter="3" onclick="icCmd('filter', {idx:3})">FIL3</button>
+      </div>
+      <span class="sep">|</span>
+      <span class="ic-label">IF shift:</span>
+      <input id="ic-ifshift" type="range" min="0" max="100" step="1" value="50" class="ic-slider"
+             style="max-width:200px"
+             oninput="document.getElementById('ic-ifshift-val').textContent = this.value + '%'"
+             onchange="icCmd('if_shift', {pct: +this.value})">
+      <span id="ic-ifshift-val" class="ic-slider-val">50%</span>
+      <button class="rb rb-sm" onclick="
+          var el = document.getElementById('ic-ifshift'); el.value = 50;
+          document.getElementById('ic-ifshift-val').textContent = '50%';
+          icCmd('if_shift', {pct: 50});"
+          title="Reset IF shift to center">Center</button>
+    </div>
+    <div class="ic-row" id="ic-hf-mic">
+      <span class="ic-label" title="The radio's own MIC gain: hand mic only. Browser audio is set with Level below.">Mic gain:</span>
+      <input id="ic-mic-gain" type="range" min="0" max="100" step="1" value="50" class="ic-slider"
+             style="max-width:160px"
+             oninput="document.getElementById('ic-mic-gain-val').textContent = this.value + '%'"
+             onchange="icCmd('mic_gain', {pct: +this.value})">
+      <span id="ic-mic-gain-val" class="ic-slider-val">50%</span>
+      <span class="ic-label" style="font-size:var(--f-xs)">(radio / hand mic; browser audio uses Level below)</span>
+    </div>
+    <div class="ic-row" id="ic-hf-radcomp">
+      <span class="ic-label" title="The radio's own speech compressor (the COMP key on the head unit). It acts only on the hand mic; the radio bypasses it for browser (USB) audio, which uses the Browser mic compressor below.">Radio compressor:</span>
+      <label><input type="checkbox" id="ic-radcomp-on" onchange="icCmd('comp_on', {on: this.checked})"> on</label>
+      <input id="ic-radcomp-level" type="range" min="0" max="100" step="1" value="50" class="ic-slider"
+             style="max-width:160px"
+             oninput="document.getElementById('ic-radcomp-level-val').textContent = this.value + '%'"
+             onchange="icCmd('comp_level', {pct: +this.value})">
+      <span id="ic-radcomp-level-val" class="ic-slider-val">50%</span>
+      <span class="ic-label" style="font-size:var(--f-xs)">(hand mic only)</span>
+    </div>
+    <div class="ic-row" id="ic-hf-swc">
+      <span class="ic-label" title="Processing applied to your browser microphone before it is sent. The radio's own compressor does not act on this audio.">Browser mic:</span>
+      <label><input type="checkbox" id="ic-swc-on"> compress</label>
+      <span class="ic-label">Amount:</span>
+      <input id="ic-swc-amt" class="ic-slider" type="range" min="0" max="100" step="1" value="50" style="max-width:150px">
+      <span id="ic-swc-amt-val" class="ic-val" style="min-width:3em">50%</span>
+      <span class="sep">|</span>
+      <span class="ic-label">Level:</span>
+      <input id="ic-mic-level" class="ic-slider" type="range" min="0" max="200" step="1" value="100" style="max-width:150px">
+      <span id="ic-mic-level-val" class="ic-val" style="min-width:3em">100%</span>
+      <span class="sep">|</span>
+      <span class="ic-label" title="Booster: digital gain (dB) in front of the CESSB envelope clipper. What it buys depends on your mic level: in simulation on synthetic speech, +12 dB gave about +5 dB more average power than unprocessed at the same RF peak when speech is around -20 dBFS RMS, about +2.5 dB at -25 dBFS, and nothing at -30 dBFS or quieter; +18 dB adds only a little more at the cost of heavier clipping. Not yet confirmed on the air.">CESSB booster:</span>
+      <input id="ic-cessb-drive" class="ic-slider" type="range" min="0" max="18" step="1" value="12" style="max-width:150px">
+      <span id="ic-cessb-drive-val" class="ic-val" style="min-width:4em">+12 dB</span>
+      <label class="ic-label" title="Restart the microphone automatically if it delivers nothing but digital silence for 6 s after audio starts (e.g. a Bluetooth headset that did not wake up). Off by default."><input type="checkbox" id="ic-deadcheck"> dead-mic check</label>
+      <span id="ic-cessb-gr" class="ic-val dim" style="min-width:6em" title="Envelope clipping depth right now"></span>
+    </div>
+  </details>
+
+  <!-- Raw CI-V console (debug) -->
+  <details class="ic-card">
+    <summary class="ic-card-title" style="cursor:pointer">Raw CI-V Console</summary>
+    <div class="ic-row" style="margin-top: var(--s-2)">
+      <input id="ic-cat-in" class="ic-input w-cat" placeholder="hex bytes e.g. FE FE 88 E0 03 FD"
+             onkeydown="if(event.key==='Enter') icCatSend()">
+      <button class="rb rb-sm" onclick="icCatSend()">Send</button>
+      <button class="rb rb-sm" onclick="document.getElementById('ic-cat-log').textContent=''">Clear</button>
+    </div>
+    <div id="ic-cat-log" style="margin-top: var(--s-2)"></div>
+  </details>
+</div>
+
+<footer class="ic-foot">
+  ic7100ctl v0.1.0 &middot;
+  <a href="https://github.com/" target="_blank" rel="noopener">github</a> &middot;
+  MIT licence
+</footer>
+
+<script src="/web/cessb.js"></script>
+<script src="/web/panel.js"></script>
+</body>
+</html>
