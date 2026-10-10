@@ -22,5 +22,6 @@ Built so far: sticky top bar shows `Mic: <input name>` (working copy only, not d
 - Quick press on a row: tune and stay open. Long press: tune and close.
 
 ## Open
-- Hold vs latch PTT; phone-only vs desktop; keyed state styling; landscape.
+- (decided: hold-to-talk only, no latch)
+- phone-only vs desktop; keyed state styling; landscape.
 - Transmit noise gate for far mics (not built); log CESSB/Level state in the [tx] line (not built).
