@@ -1685,6 +1685,8 @@ function initSwcControls() {
       micSel.appendChild(hit);
     }
     micSel.value = hit.value; hit.selected = true;
+    var mm = document.getElementById('ic-mini-mic');     // phones: the live mic stays visible next to the PTT button
+    if (mm) mm.textContent = 'Mic: ' + (label || hit.textContent);
   }
   window._syncMicDropdown = syncMicDropdown;
 

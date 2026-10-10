@@ -15,7 +15,9 @@ Built so far: sticky top bar shows `Mic: <input name>` (working copy only, not d
   Show anchor and drift on screen, e.g. `Set 3.758.000 (now 3.759.320, +1.3 kHz)`. Not an undo history.
 
 ## VHF (not yet specified)
-- Selects channels; wants a big channel up/down and a memory picker, no digit tuning.
+- Selects the radio's memory channels (bank E for the Sunday/Monday nets; knows names by heart).
+- A **Channel** button opens a full-screen, scrollable table: channel number, label. **Bank select always visible.** No digit tuning.
+- Picking a channel also sets the Return anchor.
 
 ## Open
 - Mic-level slider in the strip or meter only; hold vs latch PTT; phone-only vs desktop; keyed state styling; landscape.
