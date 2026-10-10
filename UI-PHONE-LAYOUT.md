@@ -18,7 +18,7 @@ Built so far: sticky top bar shows `Mic: <input name>` (working copy only, not d
 - Selects the radio's memory channels (bank E for the Sunday/Monday nets; knows names by heart).
 - A **Channel** button opens a full-screen, scrollable table: channel number, label. **Bank select always visible.** No digit tuning.
 - Picking a channel also sets the Return anchor.
-- Quick press on a row: tune and close. Long press: tune and stay open.
+- Quick press on a row: tune and stay open. Long press: tune and close.
 
 ## Open
 - Mic-level slider in the strip or meter only; hold vs latch PTT; phone-only vs desktop; keyed state styling; landscape.
