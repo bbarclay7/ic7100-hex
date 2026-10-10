@@ -24,5 +24,6 @@ Built so far: sticky top bar shows `Mic: <input name>` (working copy only, not d
 ## Open
 - (decided: hold-to-talk only, no latch)
 - (decided: keyed = strip tinted red, S-meter swaps to Po/SWR, thin red border around the whole screen)
-- phone-only vs desktop; landscape.
+- (decided: portrait first; landscape second, laid out like the real control head)
+- phone-only vs desktop.
 - Transmit noise gate for far mics (not built); log CESSB/Level state in the [tx] line (not built).
