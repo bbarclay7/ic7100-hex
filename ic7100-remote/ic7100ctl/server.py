@@ -605,6 +605,32 @@ def _cmd_memory_step(r, p):
     return _ok({'bank': 'ABCDE'[res[0] - 1], 'ch': res[1]})
 
 
+def _cmd_memory_list(r, p):
+    """Programmed memory channels from the last scan, for the phone channel table.
+    Scan edges and CALL (channels 100-109) are left out, as memory_step does."""
+    idx = getattr(r, 'memory_index', None) or {}
+    rows = [{'bank': 'ABCDE'[b - 1], 'ch': c, 'name': e.get('name', ''),
+             'freq_hz': e.get('freq_hz'), 'mode': e.get('mode')}
+            for (b, c), e in sorted(idx.items()) if 1 <= b <= 5 and c < 100 and e]
+    return _ok({'channels': rows, 'scanned': bool(idx)})
+
+
+def _cmd_memory_pick(r, p):
+    """Select bank and channel in one request (the channel table)."""
+    b, ch = p.get('bank'), p.get('ch', p.get('channel'))
+    if not (isinstance(b, str) and len(b) == 1 and b.upper() in 'ABCDE'):
+        return _fail('memory_pick: bank must be A..E')
+    try:
+        ch = int(ch)
+    except (TypeError, ValueError):
+        return _fail('memory_pick: channel required')
+    if not r.memory_bank_select('ABCDE'.index(b.upper()) + 1):
+        return _fail('memory_pick: bank NG')
+    if not r.memory_select(ch):
+        return _fail('memory_pick: channel NG')
+    return _ok({'bank': b.upper(), 'ch': ch})
+
+
 def _cmd_call_channel(r, p):
     which = p.get('which', '') or ''
     return _ok() if r.select_call_channel(which) else _fail('call_channel NG')
@@ -894,6 +920,8 @@ _DISPATCH: dict = {
     'rf_gain':        _cmd_rf_gain,
     'mic_info':       _cmd_mic_info,
     'memory_step':    _cmd_memory_step,
+    'memory_list':    _cmd_memory_list,
+    'memory_pick':    _cmd_memory_pick,
     'memory_select':  _cmd_memory_select,
     'call_channel':   _cmd_call_channel,
     'memory_to_vfo':  _cmd_memory_to_vfo,

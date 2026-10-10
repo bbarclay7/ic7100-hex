@@ -717,3 +717,50 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--t-accent); }
 /* Radio off (not answering): dim the whole instrument cluster; what it shows is stale. */
 .lcd { transition: opacity 0.5s ease, filter 0.5s ease; }
 .lcd.radio-off { opacity: 0.28; filter: grayscale(1) brightness(0.8); pointer-events: none; }
+
+/* ── Phone: ready-to-talk strip, lock/return/channel, keyed styling (see phone.js, UI-PHONE-LAYOUT.md) ── */
+.ic-strip, .ic-mini-tools, .ic-mini-anchor, .ic-table { display: none; }
+@media (max-width: 1000px) {
+  body { padding-bottom: 210px; }                              /* room for the strip */
+  .ic-mini-tools { display: flex; gap: var(--s-2); flex-wrap: wrap; width: 100%; margin-top: var(--s-1); }
+  .ic-mini-anchor { display: block; width: 100%; font-family: var(--f-mono); font-size: var(--f-xs); color: var(--t-text-dim); }
+  .ic-mini-tools { flex-wrap: nowrap; }
+  .ic-mini-tools .cessb-btn { flex: 1; justify-content: center; padding: 0.6em 0.3em; letter-spacing: 0.08em; gap: 0.35em; }
+  #ic-m-lock.on { color: #ffd45a; border-color: #b8923a; }
+  .ic-strip { display: block; position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+    padding: var(--s-2) var(--s-3) calc(var(--s-2) + env(safe-area-inset-bottom, 0px));
+    background: var(--t-panel); border-top: 2px solid var(--t-border-hi); }
+  .ic-strip-meter { position: relative; height: 22px; background: var(--ic-track, #222); border-radius: 4px; overflow: hidden; }
+  .ic-strip-fill { height: 100%; width: 0; background: #3aa055; transition: width .15s; }
+  .ic-strip-meter-txt { position: absolute; left: 8px; top: 2px; font-family: var(--f-mono); font-weight: 700; color: #fff; text-shadow: 0 1px 2px #000; }
+  .ic-strip-row { display: flex; align-items: center; gap: var(--s-2); margin-top: var(--s-2); }
+  .ic-strip-rf { flex: 1; display: flex; align-items: center; gap: var(--s-2); font-family: var(--f-mono); font-size: var(--f-xs); color: var(--t-text-dim); }
+  .ic-strip-rf input { flex: 1; min-width: 0; height: 36px; }
+  .ic-strip-val { min-width: 2.4em; text-align: right; }
+  .ic-strip-tick { font-size: 10px; opacity: .7; }
+  .ic-strip-mic { flex: 1; min-width: 0; font-family: var(--f-mono); font-size: var(--f-xs); color: var(--t-text-dim); }
+  .ic-strip-mictxt { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ic-strip-micbar { height: 6px; background: var(--ic-track, #222); border-radius: 3px; overflow: hidden; margin-top: 3px; }
+  .ic-strip-micfill { height: 100%; width: 0; background: #7fbf4a; }
+  .ic-strip-ptt { margin-top: var(--s-2); }
+  .ic-strip-ptt .ptt-btn { width: 100%; min-height: 72px; touch-action: none; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+  .tune-locked #ic-freq, .tune-locked #ic-vfo-knob { pointer-events: none; opacity: .55; }
+  /* keyed: red border around the screen, red strip, power meter in red */
+  body.keyed::after { content: ''; position: fixed; inset: 0; border: 4px solid #e03030; pointer-events: none; z-index: 1000; }
+  body.keyed .ic-strip { background: #3a1414; border-top-color: #e03030; }
+  body.keyed .ic-strip-fill { background: #e03030; }
+  /* channel table */
+  .ic-table { position: fixed; inset: 0; z-index: 900; flex-direction: column; background: var(--t-panel); }
+  .ic-table:not([hidden]) { display: flex; }
+  .ic-table-head { display: flex; gap: var(--s-2); padding: calc(var(--s-3) + env(safe-area-inset-top, 0px)) var(--s-3) var(--s-3);
+    border-bottom: 1px solid var(--t-border-hi); }
+  .ic-table-bank { flex: 1; min-height: 44px; }
+  .ic-table-bank.active { outline: 2px solid var(--t-accent); }
+  .ic-table-list { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .ic-table-row { display: flex; gap: var(--s-3); align-items: baseline; padding: 14px var(--s-3);
+    border-bottom: 1px solid var(--t-border); font-family: var(--f-mono); user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  .ic-table-row.cur { background: rgba(80, 160, 255, .18); }
+  .ic-table-ch { min-width: 2.5em; color: var(--t-text-dim); }
+  .ic-table-name { flex: 1; font-weight: 700; font-size: 1.15em; }
+  .ic-table-freq { color: var(--t-text-dim); font-size: var(--f-xs); }
+}

@@ -1,6 +1,7 @@
 # Phone layout: requirements gathered 2026-10-09 (from a real net check-in on an iPhone, Safari, AirPods)
 
-Built so far: sticky top bar shows `Mic: <input name>` (working copy only, not deployed).
+Built 2026-10-09 (working copy only, NOT deployed, not yet tried on a real phone): `web/phone.js` + CSS appended to `panel.css`;
+server commands `memory_list` and `memory_pick` (tests added). Checked in headless Chrome at 390 px against a mock radio.
 
 ## Ready-to-talk strip (bottom of screen, always visible)
 1. Frequency, mode, S-meter (Po/SWR while keyed)

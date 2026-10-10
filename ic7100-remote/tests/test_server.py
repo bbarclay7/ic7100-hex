@@ -101,6 +101,21 @@ class ServerSmokeTests(unittest.TestCase):
         self.assertEqual(f[5:8], b'\xa0\x00\x05')
         self.assertEqual(self._get_json('/ic7100/status')['memory_bank'], 'E')
 
+    def test_memory_list_and_pick(self):
+        self.radio.memory_index = {(5, 12): {'freq_hz': 147_220_000, 'mode': 'FM', 'name': 'SWHID'},
+                                   (5, 106): {'freq_hz': 146_520_000, 'mode': 'FM', 'name': 'CALL'},
+                                   (2, 1): {'freq_hz': 3_758_000, 'mode': 'LSB', 'name': 'NET'}}
+        r = self._post_json('/ic7100cmd', {'cmd': 'memory_list'})
+        self.assertEqual([(c['bank'], c['ch'], c['name']) for c in r['channels']],
+                         [('B', 1, 'NET'), ('E', 12, 'SWHID')])      # 106 (call/scan edge) left out
+        before = self.transport.cmd_count()
+        r = self._post_json('/ic7100cmd', {'cmd': 'memory_pick', 'bank': 'e', 'ch': 12})
+        self.assertTrue(r['ok'])
+        f = [f for f in self.transport.sent[before:] if f[4] == 0x08]
+        self.assertEqual(f[0][5:8], b'\xa0\x00\x05')             # bank E first
+        self.assertEqual(f[1][5:7], b'\x00\x12')                  # then channel 12
+        self.assertFalse(self._post_json('/ic7100cmd', {'cmd': 'memory_pick', 'bank': 'F', 'ch': 1})['ok'])
+
     def test_post_memory_bank_rejects_bad_bank(self):
         r = self._post_json('/ic7100cmd', {'cmd': 'memory_bank', 'bank': 'F'})
         self.assertFalse(r['ok'])
