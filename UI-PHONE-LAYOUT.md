@@ -15,6 +15,12 @@ server commands `memory_list` and `memory_pick` (tests added). Checked in headle
 - **Return**: jumps to an anchor frequency (set by typing + Set, picking a memory/channel, or a Mark button).
   Show anchor and drift on screen, e.g. `Set 3.758.000 (now 3.759.320, +1.3 kHz)`. Not an undo history.
 
+## Edge-on tuning wheel (phone, replaces the big dial; not built yet)
+- A strip about 56 px tall, full width, showing the knurled rim of a wheel from the side; ridges slide under the finger.
+- Horizontal drag only (does not scroll the page). Dims and ignores touches while Lock is on.
+- One ridge in every n is a different colour or texture, so rotation is visible even when the others look alike.
+- Step size per ridge: undecided (selectable / speed-dependent / both).
+
 ## VHF (not yet specified)
 - Selects the radio's memory channels (bank E for the Sunday/Monday nets; knows names by heart).
 - A **Channel** button opens a full-screen, scrollable table: channel number, label. **Bank select always visible.** No digit tuning.
