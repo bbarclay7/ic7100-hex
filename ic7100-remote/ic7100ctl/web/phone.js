@@ -65,6 +65,57 @@
     if (!before && v && !isNaN(n)) setAnchorFreq(Math.round((n > 3000 ? n / 1000 : n) * 1e6), st.mode);
   };
 
+  // ── Edge-on wheel: the rim of a thumb wheel seen from the side. Horizontal drag only.
+  // One ridge in MARK_EVERY is highlighted so the rotation stays visible. Reusable for other knobs.
+  var PITCH = 14, MARK_EVERY = 8;
+  function makeEdgeWheel(onTicks) {
+    var w = el('div', 'ic-wheel'), off = 0, acc = 0, down = false, lastX = 0;
+    function paint() {
+      var p = ((off % PITCH) + PITCH) % PITCH, m = ((off % (PITCH * MARK_EVERY)) + PITCH * MARK_EVERY) % (PITCH * MARK_EVERY);
+      w.style.backgroundPosition = '0 0, ' + m + 'px 0, ' + p + 'px 0';
+    }
+    w.addEventListener('pointerdown', function (e) { down = true; lastX = e.clientX; acc = 0; try { w.setPointerCapture(e.pointerId); } catch (_) {} });
+    w.addEventListener('pointermove', function (e) {
+      if (!down) return;
+      var dx = e.clientX - lastX; lastX = e.clientX; off += dx; acc += dx; paint();
+      var n = Math.trunc(acc / PITCH);
+      if (n) { acc -= n * PITCH; onTicks(n); }
+    });
+    var up = function () { down = false; };
+    w.addEventListener('pointerup', up); w.addEventListener('pointercancel', up);
+    w.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+    paint();
+    return w;
+  }
+  var STEPS = [[1000, '1k'], [250, '250'], [100, '100'], [10, '10']];
+  var stepHz = 1000;
+  try { var ss = +localStorage.getItem('ic.step'); if (ss > 0) stepHz = ss; } catch (_) {}
+  function buildVfoWheel() {
+    var home = document.querySelector('.lcd-knobs'); if (!home || $('ic-m-vfowheel')) return;
+    var box = el('div', 'ic-vfowheel'); box.id = 'ic-m-vfowheel';
+    var head = el('div', 'ic-wheel-head'); var val = el('span', 'ic-wheel-val', '—'); val.id = 'ic-m-wheelval';
+    head.appendChild(val); box.appendChild(head);
+    box.appendChild(makeEdgeWheel(function (n) { if (typeof _stepFreq === 'function') _stepFreq(n * stepHz); }));
+    var row = el('div', 'ic-wheel-steps');
+    STEPS.forEach(function (s) {
+      var b = el('button', 'rb ic-step', s[1]); b.dataset.step = s[0];
+      b.onclick = function () { stepHz = s[0]; try { localStorage.setItem('ic.step', String(stepHz)); } catch (_) {} drawSteps(); };
+      row.appendChild(b);
+    });
+    var snap = el('button', 'rb ic-step ic-snap', 'SNAP 1k');
+    snap.onclick = function () {
+      if (locked || typeof _freqHz !== 'number') return;
+      var d = Math.round(_freqHz / 1000) * 1000 - _freqHz; if (d) _stepFreq(d);
+    };
+    row.appendChild(snap); box.appendChild(row);
+    home.insertBefore(box, home.firstChild);
+    function drawSteps() { Array.prototype.forEach.call(row.querySelectorAll('.ic-step[data-step]'), function (b) { b.classList.toggle('active', +b.dataset.step === stepHz); }); }
+    drawSteps();
+    setInterval(function () {
+      if (typeof _freqHz === 'number') val.textContent = mhz(_freqHz) + '   step ' + (stepHz >= 1000 ? stepHz / 1000 + ' kHz' : stepHz + ' Hz');
+    }, 150);
+  }
+
   // ── Strip + extra buttons ──
   var strip, bar, barTxt, ptt, pttHome, pttNext;
   function lampBtn(id, label) {
@@ -129,6 +180,7 @@
       if (typeof st.rf_gain === 'number' && Date.now() - rfTouched > 1500) { rf.value = st.rf_gain; rfVal.textContent = st.rf_gain; }
     }, 200);
 
+    buildVfoWheel();
     movePtt();
     (PHONE.addEventListener ? PHONE.addEventListener('change', movePtt) : PHONE.addListener(movePtt));
   }

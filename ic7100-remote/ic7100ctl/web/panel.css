@@ -764,3 +764,22 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--t-accent); }
   .ic-table-name { flex: 1; font-weight: 700; font-size: 1.15em; }
   .ic-table-freq { color: var(--t-text-dim); font-size: var(--f-xs); }
 }
+
+/* edge-on wheel (phone): ridges + a highlighted marker ridge, cylinder shading on top */
+.ic-vfowheel { display: none; }
+@media (max-width: 1000px) {
+  .lcd-knobs .knob-wrap:not(.sm) { display: none; }      /* the big dial is replaced by the edge-on wheel */
+  .ic-vfowheel { display: block; width: 100%; }
+  .ic-wheel-head { font-family: var(--f-mono); font-weight: 600; color: var(--t-accent); text-align: center; padding: 2px 0 4px; }
+  .ic-wheel { height: 56px; border-radius: 8px; border: 1px solid var(--t-border-hi); touch-action: pan-y; cursor: ew-resize;
+    background-color: #1d242b; background-repeat: repeat-x, repeat-x, repeat-x;
+    background-size: 100% 100%, 112px 100%, 14px 100%;
+    background-image:
+      linear-gradient(180deg, rgba(0,0,0,.62) 0%, rgba(0,0,0,0) 38%, rgba(255,255,255,.07) 50%, rgba(0,0,0,0) 62%, rgba(0,0,0,.62) 100%),
+      linear-gradient(90deg, #e0a93a 0 4px, transparent 4px),
+      linear-gradient(90deg, #4b5762 0 3px, #1d242b 3px); }
+  .ic-wheel-steps { display: flex; gap: var(--s-2); margin-top: var(--s-2); }
+  .ic-step { flex: 1; min-height: 40px; }
+  .ic-step.active { outline: 2px solid var(--t-accent); }
+  .tune-locked .ic-vfowheel { pointer-events: none; opacity: .5; }
+}

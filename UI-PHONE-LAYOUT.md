@@ -15,12 +15,14 @@ server commands `memory_list` and `memory_pick` (tests added). Checked in headle
 - **Return**: jumps to an anchor frequency (set by typing + Set, picking a memory/channel, or a Mark button).
   Show anchor and drift on screen, e.g. `Set 3.758.000 (now 3.759.320, +1.3 kHz)`. Not an undo history.
 
-## Edge-on tuning wheel (phone, replaces the big dial; not built yet)
+## Edge-on tuning wheel (phone, replaces the big dial; built, checked headless, not yet on a real phone)
 - A strip about 56 px tall, full width, showing the knurled rim of a wheel from the side; ridges slide under the finger.
 - Horizontal drag only (does not scroll the page). Dims and ignores touches while Lock is on.
 - One ridge in every n is a different colour or texture, so rotation is visible even when the others look alike.
 - Step size per ridge: selectable buttons 1 kHz / 250 Hz / 100 Hz / 10 Hz.
 - A **snap** control rounds the current frequency to the nearest 1 kHz.
+- Value readout sits above the wheel. The same component (`makeEdgeWheel` in phone.js) can be reused for RF gain, squelch, volume, power.
+- Layout question for review: the wheel scrolls with the page while the top bar is sticky; consider putting the wheel inside the sticky bar.
 
 ## VHF (not yet specified)
 - Selects the radio's memory channels (bank E for the Sunday/Monday nets; knows names by heart).
