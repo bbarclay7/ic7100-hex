@@ -19,7 +19,8 @@ server commands `memory_list` and `memory_pick` (tests added). Checked in headle
 - A strip about 56 px tall, full width, showing the knurled rim of a wheel from the side; ridges slide under the finger.
 - Horizontal drag only (does not scroll the page). Dims and ignores touches while Lock is on.
 - One ridge in every n is a different colour or texture, so rotation is visible even when the others look alike.
-- Step size per ridge: undecided (selectable / speed-dependent / both).
+- Step size per ridge: selectable buttons 1 kHz / 250 Hz / 100 Hz / 10 Hz.
+- A **snap** control rounds the current frequency to the nearest 1 kHz.
 
 ## VHF (not yet specified)
 - Selects the radio's memory channels (bank E for the Sunday/Monday nets; knows names by heart).
