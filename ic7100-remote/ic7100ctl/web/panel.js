@@ -1916,6 +1916,9 @@ function initSwcControls() {
   }
   function down(e) {
     e.preventDefault();
+    // A touch that starts at the very bottom edge is the browser-chrome gesture (iOS: drag up to show the
+    // address bar), not a deliberate press: never key the transmitter from it.
+    if (e.pointerType === 'touch' && e.clientY > window.innerHeight - 40) return;
     try { btn.setPointerCapture(e.pointerId); } catch (_) {}
     start();
   }
