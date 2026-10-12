@@ -721,7 +721,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--t-accent); }
 /* ── Phone: ready-to-talk strip, lock/return/channel, keyed styling (see phone.js, UI-PHONE-LAYOUT.md) ── */
 .ic-strip, .ic-mini-tools, .ic-mini-anchor, .ic-table { display: none; }
 @media (max-width: 1000px) {
-  body { padding-bottom: 260px; }                              /* room for the strip */
+  body { padding-bottom: 300px; }                              /* room for the strip */
   .ic-mini-tools { display: flex; gap: var(--s-2); flex-wrap: wrap; width: 100%; margin-top: var(--s-1); }
   .ic-mini-anchor { display: block; width: 100%; font-family: var(--f-mono); font-size: var(--f-xs); color: var(--t-text-dim); }
   .ic-mini-tools { flex-wrap: nowrap; }
@@ -737,7 +737,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--t-accent); }
   .ic-strip-row { display: flex; align-items: center; gap: var(--s-2); margin-top: var(--s-2); }
   .ic-strip-rf { flex: 1; display: flex; align-items: center; gap: var(--s-2); font-family: var(--f-mono); font-size: var(--f-xs); color: var(--t-text-dim); }
   .ic-strip-rf input { flex: 1; min-width: 0; height: 36px; }
-  .ic-strip-val { min-width: 2.4em; text-align: right; }
+  .ic-strip-val { min-width: 2em; text-align: right; }
   .ic-strip-tick { font-size: 10px; opacity: .7; }
   .ic-strip-mic { flex: 1; min-width: 0; font-family: var(--f-mono); font-size: var(--f-xs); color: var(--t-text-dim); }
   .ic-strip-mictxt { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

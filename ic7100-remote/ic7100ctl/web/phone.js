@@ -127,7 +127,7 @@
   }
 
   // ── Strip + extra buttons ──
-  var strip, bar, barTxt, ptt, pttHome, pttNext;
+  var strip, bar, barTxt, ptt, pttHome, pttNext, sliders = [];
   function lampBtn(id, label) {
     var b = el('button', 'cessb-btn'); b.id = id; b.type = 'button';
     b.appendChild(el('span', 'cessb-led')); b.appendChild(el('span', 'cessb-txt', label)); return b;
@@ -161,18 +161,23 @@
 
     var rx = el('div', 'ic-strip-row');
     var nr = lampBtn('ic-m-nr', 'NR'); nr.onclick = function () { rawPost({cmd: 'nr', on: !st.nr_on}).then(poll); };
-    var rfWrap = el('label', 'ic-strip-rf', 'RF');
-    var rf = document.createElement('input'); rf.type = 'range'; rf.min = 0; rf.max = 100; rf.step = 1; rf.value = 100; rf.id = 'ic-m-rf';
-    var rfVal = el('span', 'ic-strip-val', '100');
-    var rfBusy = false, rfPending = null, rfTouched = 0;
-    function sendRf() {
-      if (rfBusy || rfPending == null) return;
-      var v = rfPending; rfPending = null; rfBusy = true;
-      rawPost({cmd: 'rf_gain', pct: v}).then(function () { rfBusy = false; sendRf(); });
+    // a labelled slider that sends its value with a command, one request in flight at a time
+    function slider(label, id, cmd, key) {
+      var wrap = el('label', 'ic-strip-rf', label), inp = document.createElement('input');
+      inp.type = 'range'; inp.min = 0; inp.max = 100; inp.step = 1; inp.value = 0; inp.id = id;
+      var val = el('span', 'ic-strip-val', '0'), busy = false, pending = null, touched = 0;
+      function send() {
+        if (busy || pending == null) return;
+        var v = pending; pending = null; busy = true;
+        rawPost({cmd: cmd, pct: v}).then(function () { busy = false; send(); });
+      }
+      inp.addEventListener('input', function () { touched = Date.now(); val.textContent = inp.value; pending = +inp.value; send(); });
+      wrap.appendChild(inp); wrap.appendChild(val);
+      sliders.push(function () { if (typeof st[key] === 'number' && Date.now() - touched > 1500) { inp.value = st[key]; val.textContent = st[key]; } });
+      return wrap;
     }
-    rf.addEventListener('input', function () { rfTouched = Date.now(); rfVal.textContent = rf.value; rfPending = +rf.value; sendRf(); });
-    rfWrap.appendChild(rf); rfWrap.appendChild(rfVal); rfWrap.appendChild(el('span', 'ic-strip-tick', '▲100'));
-    rx.appendChild(nr); rx.appendChild(rfWrap); strip.appendChild(rx);
+    var rfWrap = slider('RF', 'ic-m-rf', 'rf_gain', 'rf_gain'), sqlWrap = slider('SQL', 'ic-m-sql', 'squelch', 'squelch');
+    rx.appendChild(nr); rx.appendChild(rfWrap); rx.appendChild(sqlWrap); strip.appendChild(rx);
 
     var tx = el('div', 'ic-strip-row');
     var mic = el('div', 'ic-strip-mic'); mic.id = 'ic-m-mic';
@@ -199,7 +204,7 @@
       });
       var sc = $('ic-swc-on'); if (sc) cmp.classList.toggle('on', !!sc.checked);
       nr.classList.toggle('on', !!st.nr_on);
-      if (typeof st.rf_gain === 'number' && Date.now() - rfTouched > 1500) { rf.value = st.rf_gain; rfVal.textContent = st.rf_gain; }
+      sliders.forEach(function (f) { f(); });
     }, 200);
 
     buildVfoWheel();
