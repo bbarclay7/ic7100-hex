@@ -765,21 +765,38 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--t-accent); }
   .ic-table-freq { color: var(--t-text-dim); font-size: var(--f-xs); }
 }
 
-/* edge-on wheel (phone): ridges + a highlighted marker ridge, cylinder shading on top */
+/* edge-on wheel (phone): a cylinder seen from the side, sitting in a recessed slot */
 .ic-vfowheel { display: none; }
 @media (max-width: 1000px) {
   .lcd-knobs .knob-wrap:not(.sm) { display: none; }      /* the big dial is replaced by the edge-on wheel */
   .ic-vfowheel { display: block; width: 100%; }
-  .ic-wheel-head { font-family: var(--f-mono); font-weight: 600; color: var(--t-accent); text-align: center; padding: 2px 0 4px; }
-  .ic-wheel { height: 56px; border-radius: 8px; border: 1px solid var(--t-border-hi); touch-action: pan-y; cursor: ew-resize;
-    background-color: #1d242b; background-repeat: repeat-x, repeat-x, repeat-x;
-    background-size: 100% 100%, 112px 100%, 14px 100%;
+  .ic-wheel-head { font-family: var(--f-mono); font-weight: 600; color: var(--t-accent); text-align: center; padding: 2px 0 6px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1.4em; }
+  .ic-wheel-slot { position: relative; padding: 7px; border-radius: 14px; background: #080b0e;
+    box-shadow: inset 0 4px 10px rgba(0,0,0,.9), inset 0 -1px 0 rgba(255,255,255,.05), 0 1px 0 rgba(255,255,255,.09), 0 0 0 1px #000; }
+  .ic-wheel { height: 56px; border-radius: 6px; touch-action: pan-y; cursor: ew-resize; position: relative;
+    box-shadow: 0 0 0 1px #000, 0 2px 6px rgba(0,0,0,.7);
+    background-color: #1d242b; background-repeat: repeat-x, repeat-x, repeat-x, repeat-x;
+    background-size: 100% 100%, 100% 100%, 112px 100%, 14px 100%;
     background-image:
-      linear-gradient(180deg, rgba(0,0,0,.62) 0%, rgba(0,0,0,0) 38%, rgba(255,255,255,.07) 50%, rgba(0,0,0,0) 62%, rgba(0,0,0,.62) 100%),
+      linear-gradient(90deg, rgba(0,0,0,.85) 0%, rgba(0,0,0,.35) 9%, rgba(0,0,0,0) 22%, rgba(0,0,0,0) 78%, rgba(0,0,0,.35) 91%, rgba(0,0,0,.85) 100%),
+      linear-gradient(180deg, rgba(0,0,0,.62) 0%, rgba(0,0,0,0) 38%, rgba(255,255,255,.08) 50%, rgba(0,0,0,0) 62%, rgba(0,0,0,.62) 100%),
       linear-gradient(90deg, #e0a93a 0 4px, transparent 4px),
       linear-gradient(90deg, #4b5762 0 3px, #1d242b 3px); }
-  .ic-wheel-steps { display: flex; gap: var(--s-2); margin-top: var(--s-2); }
+  .ic-wheel-index { position: absolute; left: 50%; top: 1px; width: 0; height: 0; transform: translateX(-50%);
+    border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 8px solid var(--t-accent); pointer-events: none; }
+  .ic-wheel-steps { display: flex; gap: var(--s-2); margin-top: var(--s-3); }
   .ic-step { flex: 1; min-height: 40px; }
   .ic-step.active { outline: 2px solid var(--t-accent); }
   .tune-locked .ic-vfowheel { pointer-events: none; opacity: .5; }
+}
+
+/* phone: lines whose text changes length keep a fixed height instead of wrapping (no jumping layout) */
+@media (max-width: 1000px) {
+  .ic-mini-info { flex: 1 1 100%; min-height: 1.35em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ic-mini-anchor { min-height: 1.35em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ic-strip-meter-txt, .ic-strip-mictxt { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ic-strip-meter-txt { right: 8px; }
+  .ic-bar #ic-audio-stats { flex: 1 1 100%; min-height: 1.35em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ic-bar #ic-civ-state, .ic-bar #ic-audio-state { white-space: nowrap; }
 }

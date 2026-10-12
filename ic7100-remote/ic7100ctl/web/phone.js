@@ -45,7 +45,7 @@
   }
   function drawAnchor() {
     var t = $('ic-m-anchor'); if (!t) return;
-    if (!anchor) { t.textContent = 'No anchor: type a frequency, pick a channel or tap Mark'; return; }
+    if (!anchor) { t.textContent = 'No anchor yet (Set, channel or Mark)'; return; }
     if (anchor.kind === 'mem') {
       var here = st.memory_mode && st.memory_bank === anchor.bank && st.memory_channel === anchor.ch;
       t.textContent = 'Set ' + anchor.bank + anchor.ch + (anchor.name ? ' ' + anchor.name : '') + (here ? ' (on it)' : ' (moved)');
@@ -72,7 +72,7 @@
     var w = el('div', 'ic-wheel'), off = 0, acc = 0, down = false, lastX = 0;
     function paint() {
       var p = ((off % PITCH) + PITCH) % PITCH, m = ((off % (PITCH * MARK_EVERY)) + PITCH * MARK_EVERY) % (PITCH * MARK_EVERY);
-      w.style.backgroundPosition = '0 0, ' + m + 'px 0, ' + p + 'px 0';
+      w.style.backgroundPosition = '0 0, 0 0, ' + m + 'px 0, ' + p + 'px 0';
     }
     w.addEventListener('pointerdown', function (e) { down = true; lastX = e.clientX; acc = 0; try { w.setPointerCapture(e.pointerId); } catch (_) {} });
     w.addEventListener('pointermove', function (e) {
@@ -95,14 +95,18 @@
     var box = el('div', 'ic-vfowheel'); box.id = 'ic-m-vfowheel';
     var head = el('div', 'ic-wheel-head'); var val = el('span', 'ic-wheel-val', '—'); val.id = 'ic-m-wheelval';
     head.appendChild(val); box.appendChild(head);
-    box.appendChild(makeEdgeWheel(function (n) { if (typeof _stepFreq === 'function') _stepFreq(n * stepHz); }));
+    var slot = el('div', 'ic-wheel-slot');                      // the recess the wheel sits in
+    slot.appendChild(makeEdgeWheel(function (n) { if (typeof _stepFreq === 'function') _stepFreq(n * stepHz); }));
+    slot.appendChild(el('span', 'ic-wheel-index'));             // fixed pointer so you see how far it has turned
+    box.appendChild(slot);
     var row = el('div', 'ic-wheel-steps');
     STEPS.forEach(function (s) {
       var b = el('button', 'rb ic-step', s[1]); b.dataset.step = s[0];
       b.onclick = function () { stepHz = s[0]; try { localStorage.setItem('ic.step', String(stepHz)); } catch (_) {} drawSteps(); };
       row.appendChild(b);
     });
-    var snap = el('button', 'rb ic-step ic-snap', 'SNAP 1k');
+    var snap = el('button', 'rb ic-step ic-snap', 'SNAP');
+    snap.title = 'Round the frequency to the nearest 1 kHz';
     snap.onclick = function () {
       if (locked || typeof _freqHz !== 'number') return;
       var d = Math.round(_freqHz / 1000) * 1000 - _freqHz; if (d) _stepFreq(d);
