@@ -177,10 +177,12 @@
     var tx = el('div', 'ic-strip-row');
     var mic = el('div', 'ic-strip-mic'); mic.id = 'ic-m-mic';
     var mm = el('div', 'ic-strip-micbar'); var mf = el('div', 'ic-strip-micfill'); mm.appendChild(mf); mic.appendChild(el('span', 'ic-strip-mictxt', 'Mic: —')); mic.appendChild(mm);
-    var pre = lampBtn('ic-m-pre', 'PRE'), ces = lampBtn('ic-m-cessb', 'CESSB');
+    var cmp = lampBtn('ic-m-comp', 'COMP'), pre = lampBtn('ic-m-pre', 'PRE'), ces = lampBtn('ic-m-cessb', 'CESSB');
+    cmp.title = 'Speech compressor (runs before CESSB)';
+    cmp.onclick = function () { var c = $('ic-swc-on'); if (c) c.click(); };
     pre.onclick = function () { var b = $('ic-preemph'); if (b) b.click(); };
     ces.onclick = function () { var b = $('ic-cessb'); if (b) b.click(); };
-    tx.appendChild(mic); tx.appendChild(pre); tx.appendChild(ces); strip.appendChild(tx);
+    tx.appendChild(mic); tx.appendChild(cmp); tx.appendChild(pre); tx.appendChild(ces); strip.appendChild(tx);
 
     var pw = el('div', 'ic-strip-ptt'); pw.id = 'ic-m-pttwrap'; strip.appendChild(pw);
     document.body.appendChild(strip);
@@ -195,6 +197,7 @@
         var s = $(p[0]); if (!s) return;
         p[1].classList.toggle('on', s.classList.contains('on')); p[1].classList.toggle('na', s.classList.contains('na'));
       });
+      var sc = $('ic-swc-on'); if (sc) cmp.classList.toggle('on', !!sc.checked);
       nr.classList.toggle('on', !!st.nr_on);
       if (typeof st.rf_gain === 'number' && Date.now() - rfTouched > 1500) { rf.value = st.rf_gain; rfVal.textContent = st.rf_gain; }
     }, 200);
