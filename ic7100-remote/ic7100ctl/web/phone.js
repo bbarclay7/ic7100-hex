@@ -96,7 +96,10 @@
     var head = el('div', 'ic-wheel-head'); var val = el('span', 'ic-wheel-val', '—'); val.id = 'ic-m-wheelval';
     head.appendChild(val); box.appendChild(head);
     var slot = el('div', 'ic-wheel-slot');                      // the recess the wheel sits in
-    slot.appendChild(makeEdgeWheel(function (n) { if (typeof _stepFreq === 'function') _stepFreq(n * stepHz); }));
+    slot.appendChild(makeEdgeWheel(function (n) {
+      if (st.memory_mode) { if (typeof memStep === 'function') memStep(n); }      // memory mode: one ridge = one channel
+      else if (typeof _stepFreq === 'function') _stepFreq(n * stepHz);
+    }));
     slot.appendChild(el('span', 'ic-wheel-index'));             // fixed pointer so you see how far it has turned
     box.appendChild(slot);
     var row = el('div', 'ic-wheel-steps');
@@ -116,7 +119,10 @@
     function drawSteps() { Array.prototype.forEach.call(row.querySelectorAll('.ic-step[data-step]'), function (b) { b.classList.toggle('active', +b.dataset.step === stepHz); }); }
     drawSteps();
     setInterval(function () {
-      if (typeof _freqHz === 'number') val.textContent = mhz(_freqHz) + '   step ' + (stepHz >= 1000 ? stepHz / 1000 + ' kHz' : stepHz + ' Hz');
+      var inMem = !!st.memory_mode;
+      box.classList.toggle('mem', inMem);
+      if (inMem) { var mi = $('ic-mini-info'); val.textContent = 'CHANNEL  ' + ((mi && mi.textContent) || ''); }
+      else if (typeof _freqHz === 'number') val.textContent = mhz(_freqHz) + '   step ' + (stepHz >= 1000 ? stepHz / 1000 + ' kHz' : stepHz + ' Hz');
     }, 150);
   }
 
@@ -130,6 +136,15 @@
     var mini = $('ic-mini');
     if (!mini || $('ic-strip')) return;
     // top bar: lock / return / mark / channel + anchor line
+    var modes = el('div', 'ic-mini-modes'); modes.id = 'ic-m-modes';
+    [['A', 'VFO A'], ['B', 'VFO B'], ['M', 'MEMO']].forEach(function (m) {
+      var b = el('button', 'rb ic-mode', m[1]); b.dataset.m = m[0];
+      b.onclick = function () {
+        if (m[0] === 'M') icCmd('memory_mode', {on: true}); else icCmd('vfo', {vfo: m[0]});
+      };
+      modes.appendChild(b);
+    });
+    mini.appendChild(modes);
     var row = el('div', 'ic-mini-tools');
     var lock = lampBtn('ic-m-lock', 'LOCK'), ret = lampBtn('ic-m-return', 'RETURN'), mark = lampBtn('ic-m-mark', 'MARK'),
         chan = lampBtn('ic-m-chan', 'CHANNEL');
@@ -215,6 +230,10 @@
       }
       bar.style.width = Math.max(0, Math.min(100, raw * 100 / 255)).toFixed(0) + '%';
       barTxt.textContent = txt;
+      Array.prototype.forEach.call(document.querySelectorAll('#ic-m-modes .ic-mode'), function (b) {
+        var on = b.dataset.m === 'M' ? !!st.memory_mode : (!st.memory_mode && st.active_vfo === b.dataset.m);
+        b.classList.toggle('active', on);
+      });
       drawAnchor();
     });
   }
@@ -233,7 +252,8 @@
         var bb = el('button', 'rb ic-table-bank', b); bb.dataset.bank = b;
         bb.onclick = function () { tableBank = b; render(); }; head.appendChild(bb);
       });
-      o.appendChild(head); o.appendChild(el('div', 'ic-table-list')).id = 'ic-m-tablelist';
+      o.appendChild(head); o.appendChild(el('div', 'ic-table-toast')).id = 'ic-m-toast';
+      o.appendChild(el('div', 'ic-table-list')).id = 'ic-m-tablelist';
       document.body.appendChild(o);
     }
     o.hidden = false;
@@ -245,9 +265,15 @@
       else render();
     });
   }
-  function pick(r, close) {
+  function pick(r, close, rowEl) {
     rawPost({cmd: 'memory_pick', bank: r.bank, ch: r.ch}).then(function (d) {
-      if (d && d.ok) { setAnchorMem(r.bank, r.ch, r.name); if (close) $('ic-m-table').hidden = true; poll(); }
+      if (d && d.ok) {
+        setAnchorMem(r.bank, r.ch, r.name); poll();
+        var t = $('ic-m-toast'); if (t) { t.textContent = 'Tuned: ' + r.bank + r.ch + '  ' + (r.name || ''); t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(function () { t.classList.remove('show'); }, 1600); }
+        Array.prototype.forEach.call($('ic-m-table').querySelectorAll('.ic-table-row'), function (x) { x.classList.toggle('cur', x === rowEl); });
+        if (rowEl) { rowEl.classList.remove('flash'); void rowEl.offsetWidth; rowEl.classList.add('flash'); }
+        if (close) setTimeout(function () { $('ic-m-table').hidden = true; }, 350);
+      }
       else if (typeof icFeedback === 'function') icFeedback((d && d.error) || 'select failed', true);
     });
   }
@@ -267,13 +293,13 @@
       var timer = null, long = false, moved = false, sx = 0, sy = 0;
       tr.addEventListener('pointerdown', function (e) {
         long = false; moved = false; sx = e.clientX; sy = e.clientY;
-        timer = setTimeout(function () { long = true; timer = null; pick(r, true); }, 500);
+        timer = setTimeout(function () { long = true; timer = null; pick(r, true, tr); }, 500);
       });
       tr.addEventListener('pointermove', function (e) {
         if (Math.abs(e.clientX - sx) + Math.abs(e.clientY - sy) > 10) { moved = true; if (timer) { clearTimeout(timer); timer = null; } }
       });
       tr.addEventListener('pointerup', function () {
-        if (timer) { clearTimeout(timer); timer = null; if (!moved && !long) pick(r, false); }
+        if (timer) { clearTimeout(timer); timer = null; if (!moved && !long) pick(r, false, tr); }
       });
       tr.addEventListener('pointercancel', function () { if (timer) { clearTimeout(timer); timer = null; } });
       tr.addEventListener('contextmenu', function (e) { e.preventDefault(); });
