@@ -37,3 +37,12 @@ server commands `memory_list` and `memory_pick` (tests added). Checked in headle
 - (decided: portrait first; landscape second, laid out like the real control head)
 - phone-only vs desktop.
 - Transmit noise gate for far mics (not built); log CESSB/Level state in the [tx] line (not built).
+
+## Built and deployed 2026-10-11 (feedback from first real use)
+- Mode selector `VFO A | VFO B | MEMO` with lit state; separate CHANNEL button; wheel steps channels in memory mode.
+- Channel table: tapped row flashes and a "Tuned: ..." line confirms (no listening needed).
+- Strip: S-meter, NR, RF, SQL, Mic name + meter, COMP, PRE, CESSB, PTT. PTT ignores touches in the bottom 40 px (iOS address-bar
+  swipe keyed the transmitter) and sits 44 px above the screen bottom.
+- Compression precedes CESSB in the mic chain (Level, compressor, makeup, pre-emphasis, CESSB/clipper).
+- Operating principle: feedback comes from using it; collect items as they appear and fix in batches.
+- Not yet: landscape, transmit noise gate, `[tx]` logging of CESSB/Level/COMP state, hint that the page scrolls.
