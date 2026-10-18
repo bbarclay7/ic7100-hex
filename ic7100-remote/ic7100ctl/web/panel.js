@@ -1061,6 +1061,14 @@ function radioPowerClick() {
 }
 (function () { var b = document.getElementById('ic-radio-power'); if (b) b.addEventListener('click', radioPowerClick); })();
 
+// REMOTE TUNE: the server runs the whole procedure (low power FM-D carrier, watches SWR, restores); this only starts or stops it.
+function tuneClick() {
+  var tb = document.getElementById('ic-tune');
+  var running = tb && tb.classList.contains('on');
+  icPost(running ? {cmd: 'tune', stop: true} : {cmd: 'tune'}).then(function (r) {
+    if (r && r.ok === false) icFeedback('Tune: ' + (r.error || 'refused'), true);
+  });
+}
 function pollStatus() {
   icGet('/ic7100status').then(function(s) {
     s = s || {};
@@ -1138,6 +1146,9 @@ function pollStatus() {
     var modeEl = document.getElementById('ic-mode-cur');
     if (modeEl) modeEl.textContent = s.mode || '—';
     if (s.mode !== window._icMode) { window._icMode = s.mode; swcApply(window._micChain); cessbButton(); preButton(); }
+    var tb = document.getElementById('ic-tune'), ts = document.getElementById('ic-tune-state'), tu = s.tune || {};
+    if (tb) { tb.classList.toggle('on', !!tu.active); tb.firstChild && (tb.querySelector('.cessb-txt').textContent = tu.active ? 'STOP TUNE' : 'REMOTE TUNE'); }
+    if (ts) { ts.textContent = tu.text || ''; ts.style.color = tu.settled === false && !tu.active ? '#e55' : ''; }
     var filtEl = document.getElementById('ic-filter-cur');
     if (filtEl) filtEl.textContent = (s.filter !== undefined) ? String(s.filter) : '—';
 
@@ -1621,6 +1632,7 @@ function initSwcControls() {
   on.onchange  = function () { SWC.on = on.checked; swcSave(); swcApply(window._micChain); };
   var cb = document.getElementById('ic-cessb');
   cessbButton();
+  var tn = document.getElementById('ic-tune'); if (tn) tn.onclick = tuneClick;
   var pb = document.getElementById('ic-preemph');
   if (pb) pb.onclick = function () { SWC.pre = !SWC.pre; swcSave(); swcApply(window._micChain); preButton(); };
   preButton();
