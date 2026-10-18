@@ -108,6 +108,12 @@ Power was capped at 40% into the 50 W load; the frequency was checked clear and 
 - CESSB average level at equal received peak: +12 dB: +2.1 dB, +18 dB: +3.8 to +4.5 dB over unprocessed speech (40% and 100% agree within 0.7 dB).
 - Adjacent band: at least 43 dB below the in-band level for every version; a slight tail ending about 4 kHz below the carrier is visible on the
   waterfall at 100 W and matches the radio's own IMD3. No version is clearly worse. Single takes, +/-1 dB.
+- **Conclusion (2026-10-17, real speech through the panel's browser path): no measurable on-air gain from CESSB.** With the monitor correctly tuned,
+  at equal received peak every setting (CESSB off, +0, +3, +6, +12 dB booster, with the speech EQ, trim 0 or -12 dB) gave an average level of
+  -54 +/- 1 dB over noise; the radio's ALC (about 10 dB into limiting at the panel's default drive) already acts as the limiter. Holding the
+  audio 12 dB lower keeps the ALC quiet (ALC 13 instead of 80) but costs about 6 dB of average level. The larger gains above came from
+  synthetic speech at specific drive levels and do not carry over to real speech through the ALC. Single takes, +/-1 dB; see
+  `../../FINDINGS-2026-10-17.md` for the table.
 
 ## 9. Pitfalls found (and how they were handled)
 
