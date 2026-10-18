@@ -306,6 +306,15 @@ class RadioServer:
                 except Exception as e:
                     print(f"[RadioServer] poll_fast error: {e}", flush=True)
 
+                # CTCSS is part of the slow settings group; re-read it as soon as the channel changes.
+                fm = (getattr(self.radio, 'freq_hz', None), getattr(self.radio, 'mode', None))
+                if fm != getattr(self, '_last_fm', None):
+                    self._last_fm = fm
+                    try:
+                        self.radio.get_ctcss()
+                    except Exception:
+                        pass
+
                 # Settings cycle every Nth tick.
                 if self.settings_every > 0 and (tick % self.settings_every) == 0:
                     try:
@@ -643,11 +652,21 @@ def _cmd_memory_mode(r, p):
     return _ok({'memory_mode': on}) if ok else _fail('memory_mode NG')
 
 
+def _refresh_tone(r):
+    """Re-read CTCSS after a memory change: the slow poll would take up to 10 s, and neighbouring
+    memories often share a frequency and differ only in tone."""
+    try:
+        r.get_ctcss()
+    except Exception:
+        pass
+
+
 def _cmd_memory_select(r, p):
     ch = p.get('channel', p.get('ch'))
     if ch is None:
         return _fail('memory_select: channel required')
     ok = r.memory_select(int(ch))
+    _refresh_tone(r)
     return _ok({'memory_channel': int(ch)}) if ok else _fail('memory_select NG')
 
 
@@ -668,6 +687,7 @@ def _cmd_memory_step(r, p):
     res = r.memory_step(n)
     if res is None:
         return _fail('memory_step: pick a bank first (or the memory list is still loading)')
+    _refresh_tone(r)
     return _ok({'bank': 'ABCDE'[res[0] - 1], 'ch': res[1]})
 
 
@@ -694,6 +714,7 @@ def _cmd_memory_pick(r, p):
         return _fail('memory_pick: bank NG')
     if not r.memory_select(ch):
         return _fail('memory_pick: channel NG')
+    _refresh_tone(r)
     return _ok({'bank': b.upper(), 'ch': ch})
 
 
@@ -703,7 +724,9 @@ def _cmd_call_channel(r, p):
 
 
 def _cmd_memory_to_vfo(r, p):
-    return _ok() if r.memory_to_vfo() else _fail('memory_to_vfo NG')
+    ok = r.memory_to_vfo()
+    _refresh_tone(r)
+    return _ok() if ok else _fail('memory_to_vfo NG')
 
 
 def _cmd_memory_write(r, p):
