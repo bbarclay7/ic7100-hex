@@ -2,7 +2,7 @@
 
 Remote control of an Icom IC-7100 through a browser panel, running on a small Linux computer next to the radio and reached over Tailscale. Mine is an Intel NUC running Debian (called `hex`); upstream only asks for a Linux box that sees the radio's USB serial port and sound card, so a Raspberry Pi should work too (`pi-image/` is my untested attempt at a turnkey Pi image). It is a customised copy of ukbodypilot's [ic7100-remote](https://github.com/ukbodypilot/ic7100-remote) (the `ic7100ctl` web panel), plus the notes and test scripts from improving it.
 
-The aim is a panel I can trust for working nets from away: the transmit side (mic handling, diagnostics, CESSB, FM pre-emphasis), the receive meters, power on/off, memory channels, and a phone layout.
+The aim is a panel I can trust, and one I can use to experiment with CESSB on the IC-7100. So far that means the transmit side (mic handling, diagnostics, CESSB, FM pre-emphasis), the receive meters, power on/off, memory channels, and a phone layout.
 
 | Path | What |
 |---|---|
