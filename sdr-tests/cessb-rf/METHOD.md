@@ -119,6 +119,8 @@ Power was capped at 40% into the 50 W load; the frequency was checked clear and 
 6. The FT-710 leakage floor (two-tone control about -54 dBc, scaling 1:1) limits what can be shown.
 7. A receiver front end (AMP1) or RF gain changed between stages makes cross-stage absolute levels incomparable. Record the settings.
 8. A nearby SWL radio feeds back; the FT-710 on switch leakage is the monitor instead.
+9. The monitor receiver's dial can be bumped. In LSB, a monitor tuned 849 Hz below the transmitter shifts all recorded audio down by that amount and invalidates any spectral comparison (found by chance on 2026-10-17, 3757.151 instead of 3758.000). Check the monitor's dial frequency before every series, and again after any pause; note the frequency in the recording's name or log.
+
 
 ## 10. Limits of what these tests show
 
