@@ -1437,7 +1437,7 @@ function fmtAudioStats(stats, prev) {
 // The radio's own compressor can't act on browser audio (it arrives over USB in
 // DATA mode), so level, compression and a safety limiter happen here, before
 // the audio is sent. Settings are remembered in this browser.
-var SWC = {on: false, amt: 50, level: 100, cessb: true, drive: 12, deadCheck: false, pre: true};
+var SWC = {on: false, amt: 50, level: 100, cessb: true, drive: 12, deadCheck: false, pre: true, eq: false};
 try { var _sw = JSON.parse(localStorage.getItem('swc') || 'null'); if (_sw) SWC = Object.assign(SWC, _sw); } catch (_) {}
 SWC.drive = Math.max(0, Math.min(18, +SWC.drive || 12));      // booster range 0..+18 dB (only simulated up to +18)
 function swcSave() { try { localStorage.setItem('swc', JSON.stringify(SWC)); } catch (_) {} }
@@ -1456,22 +1456,33 @@ function swcApply(c) {
   c.comp.attack.value = 0.005; c.comp.release.value = 0.15;
   c.makeup.gain.value = Math.pow(10, p.makeupDb / 20);
   // Final stages: [FM pre-emphasis] then CESSB (SSB only, when on and loaded) or the soft clipper.
-  var useC = !!(SWC.cessb && swcIsSsb() && c.cessb), usePre = !!(SWC.pre && swcIsFm());
-  var key = (usePre ? 'P' : '-') + (useC ? 'C' : 'S');
+  var useC = !!(SWC.cessb && swcIsSsb() && c.cessb), usePre = !!(SWC.pre && swcIsFm()), useEq = !!(SWC.eq && swcIsSsb());
+  var key = (useEq ? 'E' : '-') + (usePre ? 'P' : '-') + (useC ? 'C' : 'S');
   if (c.routeKey !== key) {
-    c.makeup.disconnect(); c.pre.disconnect(); c.clip.disconnect(); if (c.cessb) c.cessb.disconnect();
+    c.makeup.disconnect(); c.eqHp.disconnect(); c.eqSh.disconnect(); c.eqLp1.disconnect(); c.eqLp2.disconnect(); c.pre.disconnect(); c.clip.disconnect(); if (c.cessb) c.cessb.disconnect();
     var head = c.makeup;
+    if (useEq) { head.connect(c.eqHp); c.eqHp.connect(c.eqSh); c.eqSh.connect(c.eqLp1); c.eqLp1.connect(c.eqLp2); head = c.eqLp2; }
     if (usePre) { head.connect(c.pre); head = c.pre; }
     if (useC) { head.connect(c.cessb); c.cessb.connect(c.dest); }
     else { head.connect(c.clip); c.clip.connect(c.dest); }
     c.routeKey = key; c.route = useC;
   }
   if (c.cessb) c.cessb.port.postMessage({drive: Math.pow(10, SWC.drive / 20), ceiling: 0.85});
-  cessbButton(); preButton();
+  cessbButton(); preButton(); eqButton();
 }
 // CESSB shapes an SSB signal's RF envelope; FM/AM have none worth shaping, so it is SSB-only.
 function swcIsFm() { return window._icMode === 'FM'; }
 function swcIsSsb() { return window._icMode === 'USB' || window._icMode === 'LSB'; }
+// TX EQ (SSB): cuts the bass and lifts the treble ahead of the clipper, so the CESSB clipper works on
+// the consonant-rich part of speech instead of the loud low vowels (the QMX manual advises the same).
+function eqButton() {
+  var b = document.getElementById('ic-eq'); if (!b) return;
+  var ssb = swcIsSsb();
+  b.classList.toggle('on', !!SWC.eq && ssb);
+  b.classList.toggle('na', !ssb);
+  b.title = !ssb ? 'TX EQ applies to SSB only (inactive in ' + (window._icMode || 'this mode') + ').'
+    : 'Transmit EQ: bass cut below about 300 Hz, a treble lift above about 1.5 kHz and a low-pass at 2.8 kHz, before the clipper. ' + (SWC.eq ? 'On.' : 'Off.');
+}
 function preButton() {
   var b = document.getElementById('ic-preemph'); if (!b) return;
   var fm = swcIsFm();
@@ -1513,6 +1524,12 @@ function buildMicChain(stream) {
   var c = {ac: ac, inGain: ac.createGain(), comp: ac.createDynamicsCompressor(),
            makeup: ac.createGain(), clip: ac.createWaveShaper()};
   c.clip.curve = softClipCurve(1.1); c.clip.oversample = '2x';
+  c.eqHp = ac.createBiquadFilter(); c.eqHp.type = 'highpass'; c.eqHp.frequency.value = 300; c.eqHp.Q.value = 0.707;
+  c.eqSh = ac.createBiquadFilter(); c.eqSh.type = 'highshelf'; c.eqSh.frequency.value = 1500; c.eqSh.gain.value = 6;
+  // 4th-order Butterworth low-pass at 2.8 kHz: the radio's SSB filter stops there anyway, and without it the
+  // clipper reacts to 's' hiss that is thrown away afterwards (clipping products fall back in band as static).
+  c.eqLp1 = ac.createBiquadFilter(); c.eqLp1.type = 'lowpass'; c.eqLp1.frequency.value = 2800; c.eqLp1.Q.value = 0.5412;
+  c.eqLp2 = ac.createBiquadFilter(); c.eqLp2.type = 'lowpass'; c.eqLp2.frequency.value = 2800; c.eqLp2.Q.value = 1.3066;
   c.an = ac.createAnalyser(); c.an.fftSize = 1024; src.connect(c.an);   // raw mic level, for the meter
   src.connect(c.inGain); c.inGain.connect(c.comp); c.comp.connect(c.makeup);
   c.makeup.connect(c.clip); c.clip.connect(dest);
@@ -1604,6 +1621,8 @@ function initSwcControls() {
   on.onchange  = function () { SWC.on = on.checked; swcSave(); swcApply(window._micChain); };
   var cb = document.getElementById('ic-cessb');
   cessbButton();
+  var eb = document.getElementById('ic-eq');
+  if (eb) eb.onclick = function () { SWC.eq = !SWC.eq; swcSave(); swcApply(window._micChain); eqButton(); };
   var pb = document.getElementById('ic-preemph');
   if (pb) pb.onclick = function () { SWC.pre = !SWC.pre; swcSave(); swcApply(window._micChain); preButton(); };
   preButton();
