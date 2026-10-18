@@ -1439,9 +1439,13 @@ function fmtAudioStats(stats, prev) {
   var lost = inb.packetsLost || 0, conc = inb.concealedSamples || 0;
   var dLost = prev ? lost - prev.lost : 0, dConc = prev ? conc - prev.conc : 0;
   var jit = Math.round((inb.jitter || 0) * 1000);
-  var text = 'lost ' + lost + (dLost > 0 ? ' (+' + dLost + ')' : '') + ' \u00b7 jitter ' + jit + ' ms' +
+  // Average time audio sat in the browser's jitter buffer since the last reading (ms), and network round trip.
+  var jbd = inb.jitterBufferDelay || 0, jbn = inb.jitterBufferEmittedCount || 0, buf = '';
+  if (prev && jbn > prev.jbn) buf = ' \u00b7 buffer ' + Math.round((jbd - prev.jbd) / (jbn - prev.jbn) * 1000) + ' ms';
+  if (pair && pair.currentRoundTripTime != null) buf += ' \u00b7 rtt ' + Math.round(pair.currentRoundTripTime * 1000) + ' ms';
+  var text = 'lost ' + lost + (dLost > 0 ? ' (+' + dLost + ')' : '') + ' \u00b7 jitter ' + jit + ' ms' + buf +
              ' \u00b7 concealed ' + Math.round(conc / 48) + ' ms' + (dConc > 0 ? ' (+' + Math.round(dConc / 48) + ')' : '') + via;
-  return {text: text, raw: {lost: lost, conc: conc}};
+  return {text: text, raw: {lost: lost, conc: conc, jbd: jbd, jbn: jbn}};
 }
 
 // ── Browser-side mic processing ─────────────────────────────────────────
