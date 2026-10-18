@@ -263,6 +263,8 @@
     <!-- Tune-step row (TX antenna-port safety interlock row above this in
          the gateway version was removed — see project notes; safety
          belongs to the antenna plant, not a software toggle). -->
+    <div class="ic-stepband">
+    <div class="ic-stepband-l">
     <div class="ic-row" style="margin-top: calc(-1 * var(--s-2));">
       <span class="ic-label" style="min-width:60px">Step:</span>
       <div class="ic-tune-steps" id="ic-tune-steps"></div>
@@ -271,6 +273,11 @@
     <div class="ic-row">
       <span class="ic-label">Band:</span>
       <div class="ic-btn-row" id="ic-band-row"></div>
+    </div>
+    </div>
+    <div id="ic-pins" class="ic-pins">
+      <details id="ic-pin-menu" class="ic-pin-menu"><summary title="Choose which HF controls to show here">&#9881; pin</summary><div id="ic-pin-list"></div></details>
+    </div>
     </div>
     
   </div>
@@ -335,56 +342,56 @@
 
     <div class="ic-row" style="margin-top: var(--s-2)">
       <span class="ic-label" style="min-width:60px">VFO:</span>
-      <label><input type="checkbox" id="ic-split-on" onchange="icCmd('split', {on: this.checked})"> Split</label>
-      <span class="sep">|</span>
-      <label><input type="checkbox" id="ic-rit-on"  onchange="icCmd('rit', {on: this.checked})"> RIT</label>
+      <span class="pin-unit" data-pin="Split"><label><input type="checkbox" id="ic-split-on" onchange="icCmd('split', {on: this.checked})"> Split</label></span>
+      
+      <span class="pin-unit" data-pin="RIT"><label><input type="checkbox" id="ic-rit-on"  onchange="icCmd('rit', {on: this.checked})"> RIT</label>
       <div id="ic-rit-hz" class="ic-freq-display" tabindex="0"
            style="font-size: 1.4em; min-width: unset; padding: 0 var(--s-2);"
            title="Click a digit then mouse-wheel or ↑/↓ to step. ←/→ move position. Click ± to toggle sign."></div>
       <span class="ic-label">Hz</span>
-      <button class="rb rb-sm" onclick="_setRitHz(0)" title="Clear RIT offset to 0">Clr</button>
-      <span class="sep">|</span>
-      <label><input type="checkbox" id="ic-xit-on" onchange="icCmd('xit', {on: this.checked})"> XIT</label>
+      <button class="rb rb-sm" onclick="_setRitHz(0)" title="Clear RIT offset to 0">Clr</button></span>
+      
+      <span class="pin-unit" data-pin="XIT"><label><input type="checkbox" id="ic-xit-on" onchange="icCmd('xit', {on: this.checked})"> XIT</label></span>
     </div>
 
     <div class="ic-row">
-      <span class="ic-label" style="min-width:60px">AGC:</span>
+      <span class="pin-unit" data-pin="AGC"><span class="ic-label" style="min-width:60px">AGC:</span>
       <div class="ic-btn-row" id="ic-agc-row">
         <button class="rb rb-sm" data-agc="fast" onclick="icCmd('agc', {mode:'fast'})">Fast</button>
         <button class="rb rb-sm" data-agc="mid"  onclick="icCmd('agc', {mode:'mid'})">Mid</button>
         <button class="rb rb-sm" data-agc="slow" onclick="icCmd('agc', {mode:'slow'})">Slow</button>
-      </div>
-      <span class="sep">|</span>
-      <span class="ic-label">Preamp:</span>
+      </div></span>
+      
+      <span class="pin-unit" data-pin="Preamp"><span class="ic-label">Preamp:</span>
       <div class="ic-btn-row" id="ic-preamp-row">
         <button class="rb rb-sm" data-preamp="0" onclick="icCmd('preamp', {stage:0})">Off</button>
         <button class="rb rb-sm" data-preamp="1" onclick="icCmd('preamp', {stage:1})">P1</button>
         <button class="rb rb-sm" data-preamp="2" onclick="icCmd('preamp', {stage:2})">P2</button>
-      </div>
-      <span class="sep">|</span>
-      <label><input type="checkbox" id="ic-atten-on"
-                    onchange="icCmd('atten', {on: this.checked})"> Atten 20 dB</label>
+      </div></span>
+      
+      <span class="pin-unit" data-pin="Atten"><label><input type="checkbox" id="ic-atten-on"
+                    onchange="icCmd('atten', {on: this.checked})"> Atten 20 dB</label></span>
     </div>
 
     <div class="ic-row">
-      <span class="ic-label" style="min-width:60px">NB:</span>
+      <span class="pin-unit" data-pin="NB"><span class="ic-label" style="min-width:60px">NB:</span>
       <label><input type="checkbox" id="ic-nb-on" onchange="icCmd('nb', {on: this.checked})"> on</label>
       <input id="ic-nb-level" type="range" min="0" max="100" step="1" value="50" class="ic-slider"
              style="max-width:160px"
              oninput="document.getElementById('ic-nb-level-val').textContent = this.value + '%'"
              onchange="icCmd('nb', {level: +this.value})">
-      <span id="ic-nb-level-val" class="ic-slider-val">50%</span>
+      <span id="ic-nb-level-val" class="ic-slider-val">50%</span></span>
     </div>
 
     <div class="ic-row">
-      <span class="ic-label" style="min-width:60px">Filter:</span>
+      <span class="pin-unit" data-pin="Filter"><span class="ic-label" style="min-width:60px">Filter:</span>
       <div class="ic-btn-row" id="ic-filter-row">
         <button class="rb rb-sm" data-filter="1" onclick="icCmd('filter', {idx:1})">FIL1</button>
         <button class="rb rb-sm" data-filter="2" onclick="icCmd('filter', {idx:2})">FIL2</button>
         <button class="rb rb-sm" data-filter="3" onclick="icCmd('filter', {idx:3})">FIL3</button>
-      </div>
-      <span class="sep">|</span>
-      <span class="ic-label">IF shift:</span>
+      </div></span>
+      
+      <span class="pin-unit" data-pin="IF shift"><span class="ic-label">IF shift:</span>
       <input id="ic-ifshift" type="range" min="0" max="100" step="1" value="50" class="ic-slider"
              style="max-width:200px"
              oninput="document.getElementById('ic-ifshift-val').textContent = this.value + '%'"
@@ -394,47 +401,47 @@
           var el = document.getElementById('ic-ifshift'); el.value = 50;
           document.getElementById('ic-ifshift-val').textContent = '50%';
           icCmd('if_shift', {pct: 50});"
-          title="Reset IF shift to center">Center</button>
+          title="Reset IF shift to center">Center</button></span>
     </div>
     <div class="ic-row" id="ic-hf-mic">
-      <span class="ic-label" title="The radio's own MIC gain: hand mic only. Browser audio is set with Level below.">Mic gain:</span>
+      <span class="pin-unit" data-pin="Mic gain (radio)"><span class="ic-label" title="The radio's own MIC gain: hand mic only. Browser audio is set with Level below.">Mic gain:</span>
       <input id="ic-mic-gain" type="range" min="0" max="100" step="1" value="50" class="ic-slider"
              style="max-width:160px"
              oninput="document.getElementById('ic-mic-gain-val').textContent = this.value + '%'"
              onchange="icCmd('mic_gain', {pct: +this.value})">
-      <span id="ic-mic-gain-val" class="ic-slider-val">50%</span>
+      <span id="ic-mic-gain-val" class="ic-slider-val">50%</span></span>
       <span class="ic-label" style="font-size:var(--f-xs)">(radio / hand mic; browser audio uses Level below)</span>
     </div>
     <div class="ic-row" id="ic-hf-radcomp">
-      <span class="ic-label" title="The radio's own speech compressor (the COMP key on the head unit). It acts only on the hand mic; the radio bypasses it for browser (USB) audio, which uses the Browser mic compressor below.">Radio compressor:</span>
+      <span class="pin-unit" data-pin="Radio comp"><span class="ic-label" title="The radio's own speech compressor (the COMP key on the head unit). It acts only on the hand mic; the radio bypasses it for browser (USB) audio, which uses the Browser mic compressor below.">Radio compressor:</span>
       <label><input type="checkbox" id="ic-radcomp-on" onchange="icCmd('comp_on', {on: this.checked})"> on</label>
       <input id="ic-radcomp-level" type="range" min="0" max="100" step="1" value="50" class="ic-slider"
              style="max-width:160px"
              oninput="document.getElementById('ic-radcomp-level-val').textContent = this.value + '%'"
              onchange="icCmd('comp_level', {pct: +this.value})">
-      <span id="ic-radcomp-level-val" class="ic-slider-val">50%</span>
+      <span id="ic-radcomp-level-val" class="ic-slider-val">50%</span></span>
       <span class="ic-label" style="font-size:var(--f-xs)">(hand mic only)</span>
     </div>
     <div class="ic-row" id="ic-hf-swc">
-      <span class="ic-label" title="Processing applied to your browser microphone before it is sent. The radio's own compressor does not act on this audio.">Browser mic:</span>
+      <span class="pin-unit" data-pin="Browser mic compress"><span class="ic-label" title="Processing applied to your browser microphone before it is sent. The radio's own compressor does not act on this audio.">Browser mic:</span>
       <label><input type="checkbox" id="ic-swc-on"> compress</label>
       <span class="ic-label">Amount:</span>
       <input id="ic-swc-amt" class="ic-slider" type="range" min="0" max="100" step="1" value="50" style="max-width:150px">
-      <span id="ic-swc-amt-val" class="ic-val" style="min-width:3em">50%</span>
-      <span class="sep">|</span>
-      <span class="ic-label">Level:</span>
+      <span id="ic-swc-amt-val" class="ic-val" style="min-width:3em">50%</span></span>
+      
+      <span class="pin-unit" data-pin="Browser mic level"><span class="ic-label">Level:</span>
       <input id="ic-mic-level" class="ic-slider" type="range" min="0" max="200" step="1" value="100" style="max-width:150px">
-      <span id="ic-mic-level-val" class="ic-val" style="min-width:3em">100%</span>
+      <span id="ic-mic-level-val" class="ic-val" style="min-width:3em">100%</span></span>
     </div>
     <div class="ic-row" id="ic-hf-cessb">
-      <span class="ic-label" title="TX trim: gain after all the processing. The radio's ALC starts limiting at about -12 dBFS of USB drive, so lowering this (about -12 dB) keeps the radio out of its ALC and lets CESSB's peak control show; 0 dB sends full level.">TX trim:</span>
+      <span class="pin-unit" data-pin="TX trim"><span class="ic-label" title="TX trim: gain after all the processing. The radio's ALC starts limiting at about -12 dBFS of USB drive, so lowering this (about -12 dB) keeps the radio out of its ALC and lets CESSB's peak control show; 0 dB sends full level.">TX trim:</span>
       <input id="ic-tx-trim" class="ic-slider" type="range" min="-24" max="0" step="1" value="0" style="max-width:150px">
-      <span id="ic-tx-trim-val" class="ic-val" style="min-width:4em">0 dB</span>
-      <span class="sep">|</span>
-      <label class="ic-label" title="CESSB on/off (SSB only). Off by default: on the air it gave no measurable gain."><input type="checkbox" id="ic-cessb"> CESSB</label>
+      <span id="ic-tx-trim-val" class="ic-val" style="min-width:4em">0 dB</span></span>
+      
+      <span class="pin-unit" data-pin="CESSB"><label class="ic-label" title="CESSB on/off (SSB only). Off by default: on the air it gave no measurable gain."><input type="checkbox" id="ic-cessb"> CESSB</label>
       <span class="ic-label" title="Booster: digital gain (dB) in front of the CESSB envelope clipper. What it buys depends on your mic level: in simulation on synthetic speech, +12 dB gave about +5 dB more average power than unprocessed at the same RF peak when speech is around -20 dBFS RMS, about +2.5 dB at -25 dBFS, and nothing at -30 dBFS or quieter; +18 dB adds only a little more at the cost of heavier clipping. Not yet confirmed on the air.">CESSB booster:</span>
       <input id="ic-cessb-drive" class="ic-slider" type="range" min="0" max="18" step="1" value="12" style="max-width:150px">
-      <span id="ic-cessb-drive-val" class="ic-val" style="min-width:4em">+12 dB</span>
+      <span id="ic-cessb-drive-val" class="ic-val" style="min-width:4em">+12 dB</span></span>
       <label class="ic-label" title="Restart the microphone automatically if it delivers nothing but digital silence for 6 s after audio starts (e.g. a Bluetooth headset that did not wake up). Off by default."><input type="checkbox" id="ic-deadcheck"> dead-mic check</label>
       <span id="ic-cessb-gr" class="ic-val dim" style="min-width:6em" title="Envelope clipping depth right now"></span>
     </div>

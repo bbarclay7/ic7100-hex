@@ -818,3 +818,17 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--t-accent); }
   .ic-table-row.cur { background: rgba(80, 160, 255, .22); border-left: 4px solid var(--t-accent); }
 }
 @keyframes ic-flash { 0% { background: rgba(255, 212, 90, .85); } 100% { background: rgba(80, 160, 255, .22); } }
+
+/* ── Pinned controls: HF-card controls the user chose to show beside Step/Band ── */
+.ic-stepband { display: flex; gap: var(--s-4); flex-wrap: wrap; align-items: flex-start; }
+.ic-stepband-l { flex: 0 1 auto; }
+.ic-pins { flex: 1 1 18em; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-3); }
+.pin-unit { display: inline-flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+.pin-unit + .pin-unit { border-left: 1px solid var(--t-border); padding-left: var(--s-3); }
+.ic-pins .pin-unit + .pin-unit { border-left: 0; padding-left: 0; }
+.ic-pins .ic-label { min-width: 0 !important; }
+.ic-pins .knob-wrap.md .knob-dial { --knob-size: 76px; }
+.ic-pin-menu { position: relative; order: 99; margin-left: auto; font-size: var(--f-xs); color: var(--t-text-dim); }
+.ic-pin-menu summary { cursor: pointer; }
+.ic-pin-menu > div { position: absolute; right: 0; top: 1.6em; z-index: 20; background: var(--t-panel, var(--t-bg)); border: 1px solid var(--t-border);
+  padding: var(--s-2) var(--s-3); display: flex; flex-direction: column; gap: 2px; white-space: nowrap; }

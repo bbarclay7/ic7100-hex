@@ -1996,3 +1996,44 @@ function initSwcControls() {
     stop();
   });
 })();
+
+
+// ── Pinned controls ─────────────────────────────────────────────────────
+// Any `.pin-unit` in the HF Controls card can be moved into #ic-pins (beside Step/Band) from the
+// "pin" menu. The element itself moves (a comment node marks its home), so its handlers and the
+// status updates keep working. The choice is remembered in this browser.
+(function () {
+  var box = document.getElementById('ic-pins'), list = document.getElementById('ic-pin-list');
+  if (!box || !list) return;
+  var units = [].slice.call(document.querySelectorAll('.pin-unit')), homes = {}, saved = [];
+  try { saved = JSON.parse(localStorage.getItem('pins') || '[]') || []; } catch (_) {}
+  units.forEach(function (u) {
+    homes[u.dataset.pin] = document.createComment('pin ' + u.dataset.pin);
+    u.parentNode.insertBefore(homes[u.dataset.pin], u);
+  });
+  var rows = [];
+  units.forEach(function (u) { var r = u.closest('.ic-row'); if (r && rows.indexOf(r) < 0) rows.push(r); });
+  function tidyRows() {                       // hide a row once none of its controls are left in it
+    rows.forEach(function (r) { r.style.display = r.querySelector('input,button,select') ? '' : 'none'; });
+  }
+  function place() {
+    units.forEach(function (u) {
+      var h = homes[u.dataset.pin];
+      if (saved.indexOf(u.dataset.pin) >= 0) box.insertBefore(u, document.getElementById('ic-pin-menu'));
+      else if (u.parentNode === box) h.parentNode.insertBefore(u, h.nextSibling);
+    });
+    tidyRows();
+  }
+  units.forEach(function (u) {
+    var l = document.createElement('label'), c = document.createElement('input');
+    c.type = 'checkbox'; c.checked = saved.indexOf(u.dataset.pin) >= 0;
+    c.onchange = function () {
+      saved = units.map(function (x) { return x.dataset.pin; }).filter(function (n) {
+        return n === u.dataset.pin ? c.checked : saved.indexOf(n) >= 0; });
+      try { localStorage.setItem('pins', JSON.stringify(saved)); } catch (_) {}
+      place();
+    };
+    l.appendChild(c); l.appendChild(document.createTextNode(' ' + u.dataset.pin)); list.appendChild(l);
+  });
+  place();
+})();
