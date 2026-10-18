@@ -1999,30 +1999,68 @@ function initSwcControls() {
 
 
 // ── Pinned controls ─────────────────────────────────────────────────────
-// Any `.pin-unit` in the HF Controls card can be moved into #ic-pins (beside Step/Band) from the
-// "pin" menu. The element itself moves (a comment node marks its home), so its handlers and the
-// status updates keep working. The choice is remembered in this browser.
+// Any `.pin-unit` in the HF Controls card can be shown a second time beside Step/Band (the "pin" menu).
+// The pinned copy is a clone with no ids and no inline handlers: what you do to it is replayed on the
+// original (so every existing handler runs once), and the original's state is copied back every 250 ms.
+// The choice is remembered in this browser.
 (function () {
   var box = document.getElementById('ic-pins'), list = document.getElementById('ic-pin-list');
   if (!box || !list) return;
-  var units = [].slice.call(document.querySelectorAll('.pin-unit')), homes = {}, saved = [];
+  var units = [].slice.call(document.querySelectorAll('.pin-unit')), copies = {}, saved = [];
   try { saved = JSON.parse(localStorage.getItem('pins') || '[]') || []; } catch (_) {}
-  units.forEach(function (u) {
-    homes[u.dataset.pin] = document.createComment('pin ' + u.dataset.pin);
-    u.parentNode.insertBefore(homes[u.dataset.pin], u);
-  });
-  var rows = [];
-  units.forEach(function (u) { var r = u.closest('.ic-row'); if (r && rows.indexOf(r) < 0) rows.push(r); });
-  function tidyRows() {                       // hide a row once none of its controls are left in it
-    rows.forEach(function (r) { r.style.display = r.querySelector('input,button,select') ? '' : 'none'; });
+
+  function stripped(src) {
+    var c = src.cloneNode(true);
+    [c].concat([].slice.call(c.querySelectorAll('*'))).forEach(function (n) {
+      n.removeAttribute('id'); n.removeAttribute('for');
+      [].slice.call(n.attributes).forEach(function (a) { if (/^on/i.test(a.name)) n.removeAttribute(a.name); });
+    });
+    return c;
+  }
+  function pairs(a, b, out) {                       // matching nodes of two identical trees
+    out.push([a, b]);
+    if (a.classList.contains('ic-freq-display')) return out;     // rebuilt by script: copied whole in sync()
+    if (a.children.length !== b.children.length) return out;
+    for (var i = 0; i < a.children.length; i++) pairs(a.children[i], b.children[i], out);
+    return out;
+  }
+  function forward(copy, orig) {
+    var map = pairs(copy, orig, []);
+    function origOf(t) { for (var i = 0; i < map.length; i++) if (map[i][0] === t) return map[i][1]; }
+    ['input', 'change'].forEach(function (type) {
+      copy.addEventListener(type, function (e) {
+        var o = origOf(e.target); if (!o) return;
+        if (e.target.type === 'checkbox') o.checked = e.target.checked; else o.value = e.target.value;
+        o.dispatchEvent(new Event(type, {bubbles: true}));
+      });
+    });
+    copy.addEventListener('click', function (e) {
+      var b = e.target.closest('button'), o = b && origOf(b); if (o) o.click();
+    });
+  }
+  function sync(copy, orig) {
+    pairs(orig, copy, []).forEach(function (p) {
+      var o = p[0], c = p[1];
+      if (o.tagName === 'INPUT') {
+        if (c === document.activeElement) return;
+        if (o.type === 'checkbox') c.checked = o.checked; else if (c.value !== o.value) c.value = o.value;
+        c.disabled = o.disabled;
+      } else if (!o.classList.contains('ic-freq-display')) {
+        if (c.className !== o.className) c.className = o.className;
+        if (!o.children.length && c.textContent !== o.textContent) c.textContent = o.textContent;
+      }
+    });
+    var od = orig.querySelector('.ic-freq-display'), cd = copy.querySelector('.ic-freq-display');
+    if (od && cd && cd.innerHTML !== od.innerHTML) cd.innerHTML = od.innerHTML;
   }
   function place() {
     units.forEach(function (u) {
-      var h = homes[u.dataset.pin];
-      if (saved.indexOf(u.dataset.pin) >= 0) box.insertBefore(u, document.getElementById('ic-pin-menu'));
-      else if (u.parentNode === box) h.parentNode.insertBefore(u, h.nextSibling);
+      var n = u.dataset.pin, want = saved.indexOf(n) >= 0;
+      if (want && !copies[n]) {
+        var c = stripped(u); copies[n] = c; forward(c, u);
+        box.insertBefore(c, document.getElementById('ic-pin-menu'));
+      } else if (!want && copies[n]) { copies[n].remove(); delete copies[n]; }
     });
-    tidyRows();
   }
   units.forEach(function (u) {
     var l = document.createElement('label'), c = document.createElement('input');
@@ -2035,5 +2073,8 @@ function initSwcControls() {
     };
     l.appendChild(c); l.appendChild(document.createTextNode(' ' + u.dataset.pin)); list.appendChild(l);
   });
+  setInterval(function () {
+    units.forEach(function (u) { var c = copies[u.dataset.pin]; if (c) sync(c, u); });
+  }, 250);
   place();
 })();
