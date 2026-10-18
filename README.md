@@ -1,6 +1,6 @@
 # ic7100-hex
 
-Remote control of an Icom IC-7100 through a browser panel, running on a small Linux computer next to the radio and reached over Tailscale. Mine is an Intel NUC running Debian (called `hex`); the upstream project targets a Raspberry Pi, and this should run on one too, but I have not tried it. It is a customised copy of ukbodypilot's [ic7100-remote](https://github.com/ukbodypilot/ic7100-remote) (the `ic7100ctl` web panel), plus the notes and test scripts from improving it.
+Remote control of an Icom IC-7100 through a browser panel, running on a small Linux computer next to the radio and reached over Tailscale. Mine is an Intel NUC running Debian (called `hex`); upstream only asks for a Linux box that sees the radio's USB serial port and sound card, so a Raspberry Pi should work too (`pi-image/` is my untested attempt at a turnkey Pi image). It is a customised copy of ukbodypilot's [ic7100-remote](https://github.com/ukbodypilot/ic7100-remote) (the `ic7100ctl` web panel), plus the notes and test scripts from improving it.
 
 The aim is a panel I can trust for working nets from away: the transmit side (mic handling, diagnostics, CESSB, FM pre-emphasis), the receive meters, power on/off, memory channels, and a phone layout.
 
@@ -12,7 +12,7 @@ The aim is a panel I can trust for working nets from away: the transmit side (mi
 | `FINDINGS-2026-10-17.md` | A bug in the transmit audio path (a 48 Hz gap in every frame) and how it was found. |
 | `UI-PHONE-LAYOUT.md` | Requirements and decisions for the phone layout. |
 | `WINE_README.md` | Winlink Express and VARA FM under Wine on the same machine (they share the radio with the panel, never at the same time). |
-| `pi-image/` | A Raspberry Pi SD-card builder (Wi-Fi, Tailscale, the `ic7100ctl` service). Written but **not tested on hardware**, and not what I run; shelved for now. |
+| `pi-image/` | My own Raspberry Pi SD-card builder (Wi-Fi, Tailscale, the `ic7100ctl` service); not part of upstream. Written but **not tested on hardware**, and not what I run; shelved for now. |
 | `radio-set`, `Makefile` | Small helpers for the host. |
 
 ## Status
