@@ -310,7 +310,19 @@ function initFreqDisplay() {
     _stepFreq(n * Math.pow(10, pos));
   }, {passive: false});
 
-  el.addEventListener('keydown', function(e) {
+  // Also works anywhere on the page, not only after clicking the frequency: arrows and Page keys
+  // tune unless you are typing in a field (or in the RIT display, which has its own keys).
+  document.addEventListener('keydown', function(e) {
+    var a = document.activeElement, t = e.target;
+    if (e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
+    if (!/^(Arrow(Up|Down|Left|Right)|Page(Up|Down))$/.test(e.key)) return;
+    if (t.closest && t.closest('#ic-freq, #ic-rit-hz')) return;       // their own handlers run
+    if (a && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))) return;
+    if (_lcdMenu) return;
+    freqKey(e);
+  });
+  el.addEventListener('keydown', function(e) { freqKey(e); });
+  function freqKey(e) {
     if (e.key === 'ArrowUp')   { e.preventDefault(); _stepFreq( Math.pow(10, _activePos)); }
     else if (e.key === 'ArrowDown') { e.preventDefault(); _stepFreq(-Math.pow(10, _activePos)); }
     else if (e.key === 'ArrowLeft')  { e.preventDefault(); _moveActivePos(+1); }
@@ -325,7 +337,7 @@ function initFreqDisplay() {
       _stepFreq(delta);
       if (_activePos > 0) _moveActivePos(-1);
     }
-  });
+  }
 }
 
 function buildStepRow() {
