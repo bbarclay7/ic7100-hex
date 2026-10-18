@@ -1437,7 +1437,7 @@ function fmtAudioStats(stats, prev) {
 // The radio's own compressor can't act on browser audio (it arrives over USB in
 // DATA mode), so level, compression and a safety limiter happen here, before
 // the audio is sent. Settings are remembered in this browser.
-var SWC = {on: false, amt: 50, level: 100, cessb: true, drive: 12, deadCheck: false, pre: true, eq: false};
+var SWC = {on: false, amt: 50, level: 100, cessb: true, drive: 12, deadCheck: false, pre: true};
 try { var _sw = JSON.parse(localStorage.getItem('swc') || 'null'); if (_sw) SWC = Object.assign(SWC, _sw); } catch (_) {}
 SWC.drive = Math.max(0, Math.min(18, +SWC.drive || 12));      // booster range 0..+18 dB (only simulated up to +18)
 function swcSave() { try { localStorage.setItem('swc', JSON.stringify(SWC)); } catch (_) {} }
@@ -1456,7 +1456,7 @@ function swcApply(c) {
   c.comp.attack.value = 0.005; c.comp.release.value = 0.15;
   c.makeup.gain.value = Math.pow(10, p.makeupDb / 20);
   // Final stages: [FM pre-emphasis] then CESSB (SSB only, when on and loaded) or the soft clipper.
-  var useC = !!(SWC.cessb && swcIsSsb() && c.cessb), usePre = !!(SWC.pre && swcIsFm()), useEq = !!(SWC.eq && swcIsSsb());
+  var useC = !!(SWC.cessb && swcIsSsb() && c.cessb), usePre = !!(SWC.pre && swcIsFm()), useEq = useC;
   var key = (useEq ? 'E' : '-') + (usePre ? 'P' : '-') + (useC ? 'C' : 'S');
   if (c.routeKey !== key) {
     c.makeup.disconnect(); c.eqHp.disconnect(); c.eqSh.disconnect(); c.eqLp1.disconnect(); c.eqLp2.disconnect(); c.pre.disconnect(); c.clip.disconnect(); if (c.cessb) c.cessb.disconnect();
@@ -1468,21 +1468,14 @@ function swcApply(c) {
     c.routeKey = key; c.route = useC;
   }
   if (c.cessb) c.cessb.port.postMessage({drive: Math.pow(10, SWC.drive / 20), ceiling: 0.85});
-  cessbButton(); preButton(); eqButton();
+  cessbButton(); preButton();
 }
 // CESSB shapes an SSB signal's RF envelope; FM/AM have none worth shaping, so it is SSB-only.
 function swcIsFm() { return window._icMode === 'FM'; }
 function swcIsSsb() { return window._icMode === 'USB' || window._icMode === 'LSB'; }
-// TX EQ (SSB): cuts the bass and lifts the treble ahead of the clipper, so the CESSB clipper works on
-// the consonant-rich part of speech instead of the loud low vowels (the QMX manual advises the same).
-function eqButton() {
-  var b = document.getElementById('ic-eq'); if (!b) return;
-  var ssb = swcIsSsb();
-  b.classList.toggle('on', !!SWC.eq && ssb);
-  b.classList.toggle('na', !ssb);
-  b.title = !ssb ? 'TX EQ applies to SSB only (inactive in ' + (window._icMode || 'this mode') + ').'
-    : 'Transmit EQ: bass cut below about 300 Hz, a treble lift above about 1.5 kHz and a low-pass at 2.8 kHz, before the clipper. ' + (SWC.eq ? 'On.' : 'Off.');
-}
+// CESSB always runs behind a speech EQ: bass cut below 300 Hz, +6 dB treble shelf above 1.5 kHz, then a
+// 2.8 kHz low-pass, so the clipper works on the consonant-rich in-band part of speech (as the QMX manual advises)
+// instead of the loud low vowels (mush) or 's' hiss that the radio's filter discards anyway (static).
 function preButton() {
   var b = document.getElementById('ic-preemph'); if (!b) return;
   var fm = swcIsFm();
@@ -1499,7 +1492,7 @@ function cessbButton() {
   b.disabled = !!(c && c.cessbFailed);
   b.title = (c && c.cessbFailed) ? 'CESSB unavailable in this browser (using the soft clipper)'
     : !ssb ? 'CESSB works on SSB only (USB/LSB); inactive in ' + (window._icMode || 'this mode') + '.'
-    : 'Controlled-envelope SSB: clips the RF envelope instead of the waveform, for more average power at the same peak. ' +
+    : 'Controlled-envelope SSB: clips the RF envelope instead of the waveform, for more average power at the same peak, behind a speech EQ (bass cut, treble lift, 2.8 kHz low-pass). ' +
       (SWC.cessb ? 'On.' : 'Off (soft clipper).');
 }
 // Final safety stage: a soft clipper. Quiet audio passes unchanged (slope 1) and
@@ -1621,8 +1614,6 @@ function initSwcControls() {
   on.onchange  = function () { SWC.on = on.checked; swcSave(); swcApply(window._micChain); };
   var cb = document.getElementById('ic-cessb');
   cessbButton();
-  var eb = document.getElementById('ic-eq');
-  if (eb) eb.onclick = function () { SWC.eq = !SWC.eq; swcSave(); swcApply(window._micChain); eqButton(); };
   var pb = document.getElementById('ic-preemph');
   if (pb) pb.onclick = function () { SWC.pre = !SWC.pre; swcSave(); swcApply(window._micChain); preButton(); };
   preButton();
