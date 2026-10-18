@@ -12,3 +12,6 @@ __pycache__/
 *.f64
 /ic7100-remote/.git.upstream/
 /draft-*.md
+/sdr-tests/cessb-rf/listen/
+*.raw
+/sdr-tests/cessb-rf/mic_*.png

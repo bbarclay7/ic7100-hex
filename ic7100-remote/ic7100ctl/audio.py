@@ -14,9 +14,11 @@ respawn on next start().
 """
 from __future__ import annotations
 
+import os
 import queue
 import subprocess
 import threading
+import time
 from typing import Optional
 
 
@@ -168,6 +170,11 @@ class AlsaPlayback:
         self._q: queue.Queue = queue.Queue(maxsize=self.QUEUE_FRAMES)
         self._writer: Optional[threading.Thread] = None
         self._stop = threading.Event()
+        self.dropped = 0              # frames discarded because aplay fell behind
+        self._dump_dir = os.environ.get('IC7100_TX_DUMP')   # debug: keep what the radio is sent
+        self._dump = None
+        self._dump_last = 0.0
+        self._dump_drops = 0
 
     RETRY_S = 2.0                # how often to retry after the codec disappears
 
@@ -233,6 +240,8 @@ class AlsaPlayback:
                 if frame is None:
                     raise BrokenPipeError
                 proc.stdin.write(frame)
+                if self._dump_dir:
+                    self._tap(frame)
                 if reported and proc.poll() is None:
                     print(f"[audio] playback restored on {self.device}", flush=True)
                     reported = False
@@ -249,11 +258,29 @@ class AlsaPlayback:
                           f"{self.RETRY_S:g} s", flush=True)
                     reported = True
 
+    def _tap(self, frame: bytes) -> None:
+        """Debug (IC7100_TX_DUMP=dir): one raw s16le 48 kHz mono file per transmission."""
+        now = time.monotonic()
+        if self._dump is not None and now - self._dump_last > 1.5:
+            name, size = self._dump.name, self._dump.tell()
+            self._dump.close()
+            print(f"[tx-dump] {name}: {size} bytes, "
+                  f"{self.dropped - self._dump_drops} frames dropped", flush=True)
+            self._dump = None
+        if self._dump is None:
+            os.makedirs(self._dump_dir, exist_ok=True)
+            self._dump = open(os.path.join(self._dump_dir, time.strftime('tx_%H%M%S.raw')), 'wb')
+            self._dump_drops = self.dropped
+        self._dump.write(frame)
+        self._dump.flush()
+        self._dump_last = now
+
     def write_frame(self, frame: bytes) -> None:
         """Queue a frame without ever blocking the caller."""
         try:
             self._q.put_nowait(frame)
         except queue.Full:
+            self.dropped += 1
             try:
                 self._q.get_nowait()          # drop the oldest
             except queue.Empty:

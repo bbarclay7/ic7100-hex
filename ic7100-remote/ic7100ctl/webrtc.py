@@ -125,7 +125,10 @@ async def _consume_tx_track(track, playback: AlsaPlayback,
             if gate is not None and not gate():
                 continue
             _TX_STATE['fwd'] += 1
-            buf = bytes(rf.planes[0])
+            # The plane buffer is padded for alignment (960 samples arrive as
+            # 1984 bytes): send only the real mono s16 samples, or every frame
+            # is followed by 32 zero samples (a 48 Hz buzz on the air).
+            buf = bytes(rf.planes[0])[:rf.samples * 2]
             pcm = array.array('h')
             pcm.frombytes(buf[:len(buf) & ~1])
             _TX_STATE['peak'] = max(_TX_STATE['peak'], max(map(abs, pcm), default=0))
