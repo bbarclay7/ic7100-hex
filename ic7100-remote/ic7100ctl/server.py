@@ -141,10 +141,21 @@ class RadioServer:
         print(f"[RadioServer] Listening on http://{self.host}:{self.port}",
               flush=True)
 
+    def _memory_empty(self):
+        """True when the panel selected a memory slot that holds nothing (per the last scan).
+        Then the radio's frequency/mode are stale, so the match must not be trusted either."""
+        r = self.radio
+        idx = getattr(r, 'memory_index', None)
+        b, c = getattr(r, 'memory_bank', None), getattr(r, 'memory_channel', None)
+        return bool(idx and getattr(r, 'memory_mode', False) and b and c and c < 100
+                    and (b, c) not in idx)
+
     def _memory_match(self):
         """Best guess at the active memory, from the scan (see
         IC7100.identify_memory). Prefers the bank last picked on the panel."""
         r = self.radio
+        if self._memory_empty():
+            return None
         try:
             m = r.identify_memory()
         except Exception:
@@ -399,6 +410,7 @@ class RadioServer:
             'memory_mode':       bool(getattr(r, 'memory_mode', False)),
             'memory_channel':    int(getattr(r, 'memory_channel', 1) or 1),
             'memory_match':      self._memory_match(),
+            'memory_empty':      self._memory_empty(),
             # Letter, or None until a bank is selected from the panel (CI-V has
             # no way to ask the radio which bank is active).
             'memory_bank':       ('ABCDE'[r.memory_bank - 1]

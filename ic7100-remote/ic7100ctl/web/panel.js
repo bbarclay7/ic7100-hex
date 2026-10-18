@@ -1299,7 +1299,7 @@ function pollStatus() {
     var mm = s.memory_match || null;
     var nameEl = document.getElementById('ic-mem-name');
     if (nameEl) {
-      nameEl.textContent = (mm && !mm.candidates) ? mm.name : '';  // blank if ambiguous
+      nameEl.textContent = s.memory_empty ? '(empty)' : (mm && !mm.candidates) ? mm.name : '';  // blank if ambiguous
       nameEl.title = !mm ? '' : mm.candidates ?
         ('Same frequency and mode as:\n' + mm.candidates.join('\n')) :
         ('Matches memory ' + mm.bank + '-' + mm.ch +
@@ -1340,7 +1340,10 @@ function pollStatus() {
     var mCap = document.getElementById('ic-memo-cap'), mId = document.getElementById('ic-memo-id');
     if (mCap && mId) {
       var mx = s.memory_match;
-      if (mx && !mx.candidates) {
+      if (s.memory_empty) {
+        mCap.textContent = 'EMPTY';
+        mId.textContent = (_memBank || '') + String(s.memory_channel || 0).padStart(2, '0');
+      } else if (mx && !mx.candidates) {
         mCap.textContent = 'MEMO';
         mId.textContent = mx.bank + String(mx.ch).padStart(2, '0');
       } else if (mx) {
