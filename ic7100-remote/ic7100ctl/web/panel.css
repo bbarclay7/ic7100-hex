@@ -661,8 +661,6 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--t-accent); }
 .lcd-knobs .knob-wrap.sm .knob-dial { --knob-size: 84px; }   /* RIT stays small under the big VFO knob */
 @media (max-width: 1000px) { .lcd-knobs .knob-wrap.sm .knob-dial { --knob-size: 84px; } }
 
-#ic-hf-mic .knob-wrap.md .knob-dial { --knob-size: 76px; }
-#ic-hf-mic { align-items: center; }
 
 /* ── Phones: the frequency stays on screen while you use the VFO knob ─────── */
 .ic-mini { display: none; }

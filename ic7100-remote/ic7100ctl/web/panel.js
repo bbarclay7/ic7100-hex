@@ -1255,10 +1255,6 @@ function pollStatus() {
     if (typeof s.rit_hz === 'number') setRitDisplay(s.rit_hz);
     setRange('ic-nb-level',  'ic-nb-level-val',  s.nb_level,  '%');
     setRange('ic-nr-level',  'ic-nr-level-val',  s.nr_level,  '%');
-    setRange('ic-mic-gain',  'ic-mic-gain-val',  s.mic_gain,  '%');
-    setRange('ic-radcomp-level', 'ic-radcomp-level-val', s.comp_level, '%');
-    var rcOn = document.getElementById('ic-radcomp-on');
-    if (rcOn && document.activeElement !== rcOn) rcOn.checked = !!s.comp_on;
     setRange('ic-ifshift',   'ic-ifshift-val',   s.if_shift,  '%');
     // rx_boost_pct was a gateway-side concept (RX audio gain applied
     // before streaming over the gateway link). On a standalone panel the

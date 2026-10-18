@@ -403,25 +403,6 @@
           icCmd('if_shift', {pct: 50});"
           title="Reset IF shift to center">Center</button></span>
     </div>
-    <div class="ic-row" id="ic-hf-mic">
-      <span class="pin-unit" data-pin="Mic gain (radio)"><span class="ic-label" title="The radio's own MIC gain: hand mic only. Browser audio is set with Level below.">Mic gain:</span>
-      <input id="ic-mic-gain" type="range" min="0" max="100" step="1" value="50" class="ic-slider"
-             style="max-width:160px"
-             oninput="document.getElementById('ic-mic-gain-val').textContent = this.value + '%'"
-             onchange="icCmd('mic_gain', {pct: +this.value})">
-      <span id="ic-mic-gain-val" class="ic-slider-val">50%</span></span>
-      <span class="ic-label" style="font-size:var(--f-xs)">(radio / hand mic; browser audio uses Level below)</span>
-    </div>
-    <div class="ic-row" id="ic-hf-radcomp">
-      <span class="pin-unit" data-pin="Radio comp"><span class="ic-label" title="The radio's own speech compressor (the COMP key on the head unit). It acts only on the hand mic; the radio bypasses it for browser (USB) audio, which uses the Browser mic compressor below.">Radio compressor:</span>
-      <label><input type="checkbox" id="ic-radcomp-on" onchange="icCmd('comp_on', {on: this.checked})"> on</label>
-      <input id="ic-radcomp-level" type="range" min="0" max="100" step="1" value="50" class="ic-slider"
-             style="max-width:160px"
-             oninput="document.getElementById('ic-radcomp-level-val').textContent = this.value + '%'"
-             onchange="icCmd('comp_level', {pct: +this.value})">
-      <span id="ic-radcomp-level-val" class="ic-slider-val">50%</span></span>
-      <span class="ic-label" style="font-size:var(--f-xs)">(hand mic only)</span>
-    </div>
     <div class="ic-row" id="ic-hf-swc">
       <span class="pin-unit" data-pin="Browser mic compress"><span class="ic-label" title="Processing applied to your browser microphone before it is sent. The radio's own compressor does not act on this audio.">Browser mic:</span>
       <label><input type="checkbox" id="ic-swc-on"> compress</label>
