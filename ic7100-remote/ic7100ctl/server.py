@@ -45,6 +45,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
 from urllib.parse import urlparse
 
+from . import tune as _tune
+
 
 # ---------------------------------------------------------------------------
 # Web assets directory (shipped inside the package)
@@ -351,6 +353,7 @@ class RadioServer:
             'filter':            getattr(r, 'filter_idx', None),
             # PTT + meters
             'transmitting':      bool(getattr(r, 'transmitting', False)),
+            'tune':              _tune_status(),
             'ptt_active':        bool(getattr(r, 'transmitting', False)),
             'smeter':            int(getattr(r, 'smeter', 0) or 0),
             'squelch_open':      bool(getattr(r, 'squelch_open', True)),
@@ -533,7 +536,58 @@ def _tx_only(r, attr: str) -> int:
 PTT_HOLD_TIMEOUT = 1.5  # s without a hold keepalive before auto-unkey
 
 
+# Remote tune (see tune.py): runs in a background thread; the panel polls `status['tune']`.
+_TUNE = {'active': False, 'text': '', 'settled': None, 'abort': None, 'finished': 0.0}
+_TUNE_LOCK = threading.Lock()
+
+
+def _tune_status() -> dict:
+    with _TUNE_LOCK:
+        recent = (time.monotonic() - _TUNE['finished']) < 30
+        return {'active': _TUNE['active'], 'settled': _TUNE['settled'],
+                'text': _TUNE['text'] if (_TUNE['active'] or recent) else ''}
+
+
+def _cmd_tune(r, p):
+    if p.get('stop'):
+        with _TUNE_LOCK:
+            if _TUNE['abort'] is not None:
+                _TUNE['abort'].set()
+        return _ok({'tune': 'stopping'})
+    with _TUNE_LOCK:
+        if _TUNE['active']:
+            return _fail('a tune is already running')
+        if getattr(r, 'transmitting', False):
+            return _fail('the radio is already transmitting')
+        ev = threading.Event()
+        _TUNE.update(active=True, text='starting', settled=None, abort=ev)
+    power = max(1, min(30, int(p.get('power', 15))))
+    limit = max(2.0, min(20.0, float(p.get('limit', 10))))
+
+    def run():
+        seen = []
+        def on_sample(secs, raw, ratio):
+            seen.append((secs, raw, ratio))
+            with _TUNE_LOCK:
+                _TUNE['text'] = f'[ {ratio:4.1f}:1 ] [{_tune.trace(seen)}'
+        try:
+            res = _tune.tune(r, power=power, limit=limit, end='restore', on_sample=on_sample, abort=ev)
+            verdict = 'tuned' if res.settled else f'NOT tuned ({res.reason})'
+            ratio = f'{res.final_ratio:.1f}:1' if res.final_ratio else 'no reading'
+            text, settled = f'{verdict}: SWR {ratio} in {res.seconds:.1f} s [{_tune.trace(seen)}]', res.settled
+        except Exception as e:                   # TuneError or anything else: say so, tune() already unkeyed
+            text, settled = f'tune failed: {e}', False
+        with _TUNE_LOCK:
+            _TUNE.update(active=False, text=text, settled=settled, abort=None, finished=time.monotonic())
+        print(f'[tune] {text}', flush=True)
+
+    threading.Thread(target=run, name='tune', daemon=True).start()
+    return _ok({'tune': 'started'})
+
+
 def _cmd_ptt(r, p):
+    if getattr(r, 'tuning', False):
+        return _fail('a tune is running')
     if 'state' in p:
         on = bool(p['state'])
     else:
@@ -912,6 +966,7 @@ _DISPATCH: dict = {
     'mode':           _cmd_mode,
     'filter':         _cmd_filter,
     'ptt':            _cmd_ptt,
+    'tune':           _cmd_tune,
     'vfo':            _cmd_vfo,
     'vfo_swap':       _cmd_vfo_swap,
     'vfo_equalize':   _cmd_vfo_equalize,

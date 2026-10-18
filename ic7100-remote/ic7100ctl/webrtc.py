@@ -163,6 +163,8 @@ class WebRTCBridge:
     def _tx_gate(self) -> bool:
         """True while the radio is keyed, or a hold-to-talk key-up is pending."""
         r = self.radio
+        if getattr(r, 'tuning', False):          # remote tune: a silent carrier, never the mic
+            return False
         return bool(getattr(r, 'transmitting', False)
                     or getattr(r, '_ptt_deadline', None))
 

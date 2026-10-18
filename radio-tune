@@ -32,15 +32,6 @@ from ic7100ctl.radio import IC7100
 PORT = '/dev/ic7100'
 
 
-def trace(samples):
-    levels = ' _.,:-=+*#'
-    out = []
-    for _, _, ratio in samples:
-        i = int(round((len(levels) - 1) * min(1.0, (ratio - 1.0) / 5.0)))
-        out.append(levels[i])
-    return ''.join(out)
-
-
 def main():
     ap = argparse.ArgumentParser(add_help=False)
     ap.add_argument('target', nargs='?')
@@ -72,7 +63,7 @@ def main():
 
     def show(secs, raw, ratio):
         seen.append((secs, raw, ratio))
-        line = f'[ {ratio:4.1f}:1 ] [{trace(seen)}'
+        line = f'[ {ratio:4.1f}:1 ] [{T.trace(seen)}'
         if tty:
             sys.stdout.write('\r\x1b[2K' + line)          # back to column 0, clear the line, redraw
             sys.stdout.flush()

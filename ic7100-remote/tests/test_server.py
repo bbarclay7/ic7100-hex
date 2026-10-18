@@ -116,6 +116,36 @@ class ServerSmokeTests(unittest.TestCase):
         self.assertEqual(f[1][5:7], b'\x00\x12')                  # then channel 12
         self.assertFalse(self._post_json('/ic7100cmd', {'cmd': 'memory_pick', 'bank': 'F', 'ch': 1})['ok'])
 
+    def test_remote_tune_command_runs_in_background_and_blocks_ptt(self):
+        from unittest import mock
+        from ic7100ctl import tune as tunemod
+        started = threading.Event()
+
+        def fake_tune(r, power=15, limit=10, end='restore', on_sample=None, abort=None, **kw):
+            r.tuning = True
+            on_sample(0.1, 40, 1.4)
+            started.set()
+            abort.wait(3)                                   # runs until stopped
+            r.tuning = False
+            return tunemod.TuneResult(settled=False, reason='cancelled', final_ratio=1.4, seconds=0.5,
+                                      samples=[(0.1, 40, 1.4)])
+        with mock.patch('ic7100ctl.tune.tune', fake_tune):
+            self.assertTrue(self._post_json('/ic7100cmd', {'cmd': 'tune'})['ok'])
+            self.assertTrue(started.wait(2))
+            st = self._get_json('/ic7100status')['tune']
+            self.assertTrue(st['active'])
+            self.assertIn('1.4:1', st['text'])
+            self.assertFalse(self._post_json('/ic7100cmd', {'cmd': 'tune'})['ok'])             # one at a time
+            self.assertFalse(self._post_json('/ic7100cmd', {'cmd': 'ptt', 'state': True})['ok'])   # no PTT meanwhile
+            self.assertTrue(self._post_json('/ic7100cmd', {'cmd': 'tune', 'stop': True})['ok'])
+            for _ in range(40):
+                if not self._get_json('/ic7100status')['tune']['active']:
+                    break
+                time.sleep(0.05)
+            st = self._get_json('/ic7100status')['tune']
+            self.assertFalse(st['active'])
+            self.assertIn('NOT tuned (cancelled)', st['text'])
+
     def test_post_memory_bank_rejects_bad_bank(self):
         r = self._post_json('/ic7100cmd', {'cmd': 'memory_bank', 'bank': 'F'})
         self.assertFalse(r['ok'])

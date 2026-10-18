@@ -10,6 +10,7 @@ Used by the `radio-tune` command and the panel's REMOTE TUNE button.
 """
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Tuple
@@ -38,6 +39,13 @@ def swr_ratio(raw: int) -> float:
     return SWR_CAL[-1][1]
 
 
+def trace(samples) -> str:
+    """One character per reading: a high mark for a bad match, `_` for a good one."""
+    levels = ' _.,:-=+*#'
+    return ''.join(levels[int(round((len(levels) - 1) * min(1.0, (ratio - 1.0) / 5.0)))]
+                   for _, _, ratio in samples)
+
+
 def parse_target(text: str) -> float:
     """'40m' -> its FT8 dial frequency; a plain number is MHz."""
     t = text.strip().lower()
@@ -61,6 +69,7 @@ class TuneResult:
 def tune(r, mhz: Optional[float] = None, power: int = 15, limit: float = 10.0,
          target: float = 1.5, hold: int = 3, end: str = 'restore',
          on_sample: Optional[Callable[[float, int, float], None]] = None,
+         abort: Optional[threading.Event] = None,
          sleep: Callable[[float], None] = time.sleep,
          now: Callable[[], float] = time.monotonic) -> TuneResult:
     """Run one tune on radio `r`. end='restore' puts back the original frequency/mode/DATA/power;
@@ -82,6 +91,7 @@ def tune(r, mhz: Optional[float] = None, power: int = 15, limit: float = 10.0,
 
     res = TuneResult()
     t0 = now()
+    r.tuning = True                       # keeps browser mic audio and the PTT button out of it
     good = misses = 0
     keyed = False
     try:
@@ -90,8 +100,12 @@ def tune(r, mhz: Optional[float] = None, power: int = 15, limit: float = 10.0,
         if not r.set_ptt(True):
             raise TuneError('the radio did not key')
         keyed = True
+        r._ptt_deadline = time.monotonic() + limit + 3    # the server watchdog unkeys if this thread dies
         res.reason = 'timeout'
         while now() - t0 < limit:
+            if abort is not None and abort.is_set():
+                res.reason = 'cancelled'
+                break
             raw = r.get_swr()
             t = now() - t0
             if raw is None:
@@ -135,6 +149,8 @@ def tune(r, mhz: Optional[float] = None, power: int = 15, limit: float = 10.0,
                 step()
             except Exception:
                 pass
+        r._ptt_deadline = None
+        r.tuning = False
         res.seconds = now() - t0
     if keyed:
         raise TuneError('WARNING: could not confirm the radio unkeyed; check it now')
