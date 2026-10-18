@@ -200,7 +200,7 @@
       if (src && src.firstChild) mf.style.width = src.firstChild.style.width || '0';
       [['ic-preemph', pre], ['ic-cessb', ces]].forEach(function (p) {
         var s = $(p[0]); if (!s) return;
-        p[1].classList.toggle('on', s.classList.contains('on')); p[1].classList.toggle('na', s.classList.contains('na'));
+        p[1].classList.toggle('on', s.type === 'checkbox' ? s.checked : s.classList.contains('on')); p[1].classList.toggle('na', s.classList.contains('na'));
       });
       var sc = $('ic-swc-on'); if (sc) cmp.classList.toggle('on', !!sc.checked);
       nr.classList.toggle('on', !!st.nr_on);
