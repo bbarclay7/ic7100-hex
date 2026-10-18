@@ -8,7 +8,8 @@ usage:
   radio-tune 14.2 -i       tune on 14.200 MHz, showing the SWR as it settles
   radio-tune 20m --restore tune, then put the frequency, mode and power back as they were
 
-  -i, --interactive   print every SWR reading as a bar, then a one-line trace at the end
+  -i, --interactive   show the SWR live on one line that updates in place: [ 1.4:1 ] [*+-:,.__  (value left of the trace;
+                      scrolling lines instead if the output is not a terminal)
   --power PCT         tune power in percent of the radio's scale (default 15: about 15 W on HF)
   --limit SECS        give up after this long (default 10)
   --restore           end where the radio started, instead of on the band's FT8 frequency in USB-D
@@ -29,17 +30,6 @@ from ic7100ctl.civ import CIVTransport
 from ic7100ctl.radio import IC7100
 
 PORT = '/dev/ic7100'
-BAR = 40
-
-
-def bar(ratio):
-    """Log scale, 1:1 at the left edge to 6:1 at the right, with a mark at the 1.5 target."""
-    import math
-    n = max(0, min(BAR, round(BAR * math.log(max(ratio, 1.0)) / math.log(6.0))))
-    goal = round(BAR * math.log(1.5) / math.log(6.0))
-    cells = ['#' if i < n else '.' for i in range(BAR)]
-    cells[goal] = '|' if cells[goal] == '.' else '+'
-    return ''.join(cells)
 
 
 def trace(samples):
@@ -77,25 +67,39 @@ def main():
         sys.exit(f'cannot open {PORT}')
     r = IC7100(t)
 
+    seen = []
+    tty = sys.stdout.isatty()
+
     def show(secs, raw, ratio):
-        print(f'{secs:5.1f} s  SWR {ratio:4.1f}:1  {bar(ratio)}', flush=True)
+        seen.append((secs, raw, ratio))
+        line = f'[ {ratio:4.1f}:1 ] [{trace(seen)}'
+        if tty:
+            sys.stdout.write('\r\x1b[2K' + line)          # back to column 0, clear the line, redraw
+            sys.stdout.flush()
+        else:
+            print(f'{secs:5.1f} s  {line}', flush=True)
 
     print(f'tuning on {mhz:.3f} MHz at {a.power}% (FM-D carrier), limit {a.limit:g} s'
           + ('; Ctrl-C stops and unkeys' if a.interactive else ''), flush=True)
+    if a.interactive and tty:
+        sys.stdout.write('\x1b[?25l')                        # hide the cursor while the line updates
     try:
         res = T.tune(r, mhz=mhz, power=a.power, limit=a.limit,
                      end='restore' if a.restore else 'ft8',
                      on_sample=show if a.interactive else None)
     except KeyboardInterrupt:
+        sys.stdout.write('\x1b[?25h')
         print('\ninterrupted: the radio was unkeyed and the power restored')
         t.disconnect()
         return 1
     except T.TuneError as e:
-        print(f'error: {e}')
+        sys.stdout.write('\x1b[?25h' if tty else '')
+        print(f'\nerror: {e}')
         t.disconnect()
         return 1
-    if a.interactive and res.samples:
-        print(f'trace: [{trace(res.samples)}]  (1:1 left, ~6:1 right)')
+    if a.interactive and tty:
+        sys.stdout.write('\x1b[?25h\n')
+        print('(trace: 1:1 at the low end, about 6:1 at the top; `_` is a good match)')
     verdict = 'settled' if res.settled else f'NOT settled ({res.reason})'
     final = f'{res.final_ratio:.1f}:1' if res.final_ratio else 'no reading'
     print(f'{verdict}: SWR {final} after {res.seconds:.1f} s; now {r.get_freq():.3f} MHz '
