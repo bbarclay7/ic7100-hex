@@ -43,7 +43,6 @@
     <button id="ic-preemph" class="cessb-btn on" type="button"><span class="cessb-led"></span><span class="cessb-txt">FM PRE-EMPH</span></button>
     <button id="ic-tune" class="cessb-btn" type="button" title="Remote tune (HF and 6 m): saves the mode and power, sets FM-D at 15%, keys a steady carrier, watches the SWR until it is 1.5:1 or better, unkeys and restores. Press again to stop."><span class="cessb-led"></span><span class="cessb-txt">REMOTE TUNE</span></button>
     <span id="ic-tune-state" class="ic-val" style="font-family:monospace"></span>
-    <button id="ic-cessb" class="cessb-btn on" type="button"><span class="cessb-led"></span><span class="cessb-txt">CESSB</span></button>
     <span id="ic-mic-dead" style="display:none;color:#e55;font-weight:bold" title="The microphone is delivering digital silence">MIC DEAD</span>
     <span id="ic-mic-meter" title="Microphone level" style="display:inline-block;width:60px;height:8px;background:var(--ic-track,#333);border-radius:2px;vertical-align:middle;overflow:hidden"><span style="display:block;height:100%;width:0;background:#4c4"></span></span>
     <select id="ic-mic-dev" class="ic-select" style="max-width:14em" title="Microphone the browser sends. Changing it while audio is running restarts the audio."></select>
@@ -432,6 +431,7 @@
       <input id="ic-tx-trim" class="ic-slider" type="range" min="-24" max="0" step="1" value="0" style="max-width:150px">
       <span id="ic-tx-trim-val" class="ic-val" style="min-width:4em">0 dB</span>
       <span class="sep">|</span>
+      <label class="ic-label" title="CESSB on/off (SSB only). Off by default: on the air it gave no measurable gain."><input type="checkbox" id="ic-cessb"> CESSB</label>
       <span class="ic-label" title="Booster: digital gain (dB) in front of the CESSB envelope clipper. What it buys depends on your mic level: in simulation on synthetic speech, +12 dB gave about +5 dB more average power than unprocessed at the same RF peak when speech is around -20 dBFS RMS, about +2.5 dB at -25 dBFS, and nothing at -30 dBFS or quieter; +18 dB adds only a little more at the cost of heavier clipping. Not yet confirmed on the air.">CESSB booster:</span>
       <input id="ic-cessb-drive" class="ic-slider" type="range" min="0" max="18" step="1" value="12" style="max-width:150px">
       <span id="ic-cessb-drive-val" class="ic-val" style="min-width:4em">+12 dB</span>

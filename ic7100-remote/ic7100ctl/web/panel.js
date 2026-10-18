@@ -1448,7 +1448,7 @@ function fmtAudioStats(stats, prev) {
 // The radio's own compressor can't act on browser audio (it arrives over USB in
 // DATA mode), so level, compression and a safety limiter happen here, before
 // the audio is sent. Settings are remembered in this browser.
-var SWC = {on: false, amt: 50, level: 100, cessb: true, drive: 12, deadCheck: false, pre: true, trim: 0};
+var SWC = {on: false, amt: 50, level: 100, cessbOn: false, drive: 12, deadCheck: false, pre: true, trim: 0};
 try { var _sw = JSON.parse(localStorage.getItem('swc') || 'null'); if (_sw) SWC = Object.assign(SWC, _sw); } catch (_) {}
 SWC.drive = Math.max(0, Math.min(18, +SWC.drive || 12));
 SWC.trim = Math.max(-24, Math.min(0, +SWC.trim || 0));        // TX trim, dB, after all processing      // booster range 0..+18 dB (only simulated up to +18)
@@ -1469,7 +1469,7 @@ function swcApply(c) {
   c.comp.attack.value = 0.005; c.comp.release.value = 0.15;
   c.makeup.gain.value = Math.pow(10, p.makeupDb / 20);
   // Final stages: [FM pre-emphasis] then CESSB (SSB only, when on and loaded) or the soft clipper.
-  var useC = !!(SWC.cessb && swcIsSsb() && c.cessb), usePre = !!(SWC.pre && swcIsFm()), useEq = useC;
+  var useC = !!(SWC.cessbOn && swcIsSsb() && c.cessb), usePre = !!(SWC.pre && swcIsFm()), useEq = useC;
   var key = (useEq ? 'E' : '-') + (usePre ? 'P' : '-') + (useC ? 'C' : 'S');
   if (c.routeKey !== key) {
     c.makeup.disconnect(); c.eqHp.disconnect(); c.eqSh.disconnect(); c.eqLp1.disconnect(); c.eqLp2.disconnect(); c.pre.disconnect(); c.clip.disconnect(); if (c.cessb) c.cessb.disconnect();
@@ -1500,13 +1500,11 @@ function preButton() {
 function cessbButton() {
   var b = document.getElementById('ic-cessb'); if (!b) return;
   var c = window._micChain, ssb = swcIsSsb();
-  b.classList.toggle('on', !!SWC.cessb && ssb);
-  b.classList.toggle('na', !ssb);
+  b.checked = !!SWC.cessbOn;
   b.disabled = !!(c && c.cessbFailed);
   b.title = (c && c.cessbFailed) ? 'CESSB unavailable in this browser (using the soft clipper)'
-    : !ssb ? 'CESSB works on SSB only (USB/LSB); inactive in ' + (window._icMode || 'this mode') + '.'
-    : 'Controlled-envelope SSB: clips the RF envelope instead of the waveform, for more average power at the same peak, behind a speech EQ (bass cut, treble lift, 2.8 kHz low-pass). ' +
-      (SWC.cessb ? 'On.' : 'Off (soft clipper).');
+    : 'Controlled-envelope SSB: clips the RF envelope instead of the waveform, behind a speech EQ (bass cut, treble lift, 2.8 kHz low-pass). SSB only (USB/LSB)' +
+      (ssb ? '. ' : '; inactive in ' + (window._icMode || 'this mode') + '. ') + (SWC.cessbOn ? 'On.' : 'Off (soft clipper).');
 }
 // Final safety stage: a soft clipper. Quiet audio passes unchanged (slope 1) and
 // peaks are bounded below 1/k (0.91), so the radio's ALC isn't slammed. (Web Audio
@@ -1636,7 +1634,7 @@ function initSwcControls() {
   var pb = document.getElementById('ic-preemph');
   if (pb) pb.onclick = function () { SWC.pre = !SWC.pre; swcSave(); swcApply(window._micChain); preButton(); };
   preButton();
-  if (cb) cb.onclick = function () { SWC.cessb = !SWC.cessb; swcSave(); swcApply(window._micChain); cessbButton(); };
+  if (cb) cb.onchange = function () { SWC.cessbOn = cb.checked; swcSave(); swcApply(window._micChain); cessbButton(); };
   amt.oninput  = function () { SWC.amt = +amt.value; swcSave(); show(); swcApply(window._micChain); };
   var dck = document.getElementById('ic-deadcheck');
   if (dck) { dck.checked = !!SWC.deadCheck; dck.onchange = function () { SWC.deadCheck = dck.checked; swcSave(); }; }
