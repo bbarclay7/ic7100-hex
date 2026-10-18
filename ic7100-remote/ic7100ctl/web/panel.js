@@ -93,12 +93,14 @@ var _inMem = false;   // memory mode as shown (set by the panel or inferred); se
 function toggleVfoMem() { if (_inMem) setVfoMode(); else setMemMode(); }
 function setVfoMode() { icCmd('vfo', {vfo: _activeVfo || 'A'}); }
 function setMemMode() { icCmd('memory_mode', {on: true}); }
+var _memChAt = 0;
 function selectMemoryChannel() {
   var el = document.getElementById('ic-mem-ch');
   var n = parseInt(el.value, 10);
   if (isNaN(n) || n < 1) n = 1;
   if (n > 99) n = 99;
   el.value = n;
+  _memChAt = Date.now();   // the status poll must not put the old number back while this is in flight
   icCmd('memory_select', {channel: n});
 }
 var _memBank = null;
@@ -1368,7 +1370,7 @@ function pollStatus() {
     var memBtn = document.getElementById('ic-mem-toggle');
     if (memBtn) memBtn.classList.toggle('active', _memMode);
     var memCh = document.getElementById('ic-mem-ch');
-    if (memCh && document.activeElement !== memCh && typeof s.memory_channel === 'number') {
+    if (memCh && document.activeElement !== memCh && Date.now() - _memChAt > 3000 && typeof s.memory_channel === 'number') {
       memCh.value = s.memory_channel;
     }
     var vfoPill = document.getElementById('ic-vfo-pill');
