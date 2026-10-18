@@ -424,6 +424,11 @@
       <span class="ic-label">Level:</span>
       <input id="ic-mic-level" class="ic-slider" type="range" min="0" max="200" step="1" value="100" style="max-width:150px">
       <span id="ic-mic-level-val" class="ic-val" style="min-width:3em">100%</span>
+    </div>
+    <div class="ic-row" id="ic-hf-cessb">
+      <span class="ic-label" title="TX trim: gain after all the processing. The radio's ALC starts limiting at about -12 dBFS of USB drive, so lowering this (about -12 dB) keeps the radio out of its ALC and lets CESSB's peak control show; 0 dB sends full level.">TX trim:</span>
+      <input id="ic-tx-trim" class="ic-slider" type="range" min="-24" max="0" step="1" value="0" style="max-width:150px">
+      <span id="ic-tx-trim-val" class="ic-val" style="min-width:4em">0 dB</span>
       <span class="sep">|</span>
       <span class="ic-label" title="Booster: digital gain (dB) in front of the CESSB envelope clipper. What it buys depends on your mic level: in simulation on synthetic speech, +12 dB gave about +5 dB more average power than unprocessed at the same RF peak when speech is around -20 dBFS RMS, about +2.5 dB at -25 dBFS, and nothing at -30 dBFS or quieter; +18 dB adds only a little more at the cost of heavier clipping. Not yet confirmed on the air.">CESSB booster:</span>
       <input id="ic-cessb-drive" class="ic-slider" type="range" min="0" max="18" step="1" value="12" style="max-width:150px">

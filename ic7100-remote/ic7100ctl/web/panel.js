@@ -1437,9 +1437,10 @@ function fmtAudioStats(stats, prev) {
 // The radio's own compressor can't act on browser audio (it arrives over USB in
 // DATA mode), so level, compression and a safety limiter happen here, before
 // the audio is sent. Settings are remembered in this browser.
-var SWC = {on: false, amt: 50, level: 100, cessb: true, drive: 12, deadCheck: false, pre: true};
+var SWC = {on: false, amt: 50, level: 100, cessb: true, drive: 12, deadCheck: false, pre: true, trim: 0};
 try { var _sw = JSON.parse(localStorage.getItem('swc') || 'null'); if (_sw) SWC = Object.assign(SWC, _sw); } catch (_) {}
-SWC.drive = Math.max(0, Math.min(18, +SWC.drive || 12));      // booster range 0..+18 dB (only simulated up to +18)
+SWC.drive = Math.max(0, Math.min(18, +SWC.drive || 12));
+SWC.trim = Math.max(-24, Math.min(0, +SWC.trim || 0));        // TX trim, dB, after all processing      // booster range 0..+18 dB (only simulated up to +18)
 function swcSave() { try { localStorage.setItem('swc', JSON.stringify(SWC)); } catch (_) {} }
 // Amount 0-100 -> compressor settings. 0 = off-equivalent (ratio 1, no makeup).
 // The makeup gain gives back some of the level that compression takes off; the
@@ -1452,6 +1453,7 @@ function swcApply(c) {
   if (!c) return;
   var p = swcParams(SWC.on ? SWC.amt : 0);
   c.inGain.gain.value = Math.max(0, SWC.level) / 100;
+  c.trim.gain.value = Math.pow(10, SWC.trim / 20);
   c.comp.threshold.value = p.threshold; c.comp.knee.value = 6; c.comp.ratio.value = p.ratio;
   c.comp.attack.value = 0.005; c.comp.release.value = 0.15;
   c.makeup.gain.value = Math.pow(10, p.makeupDb / 20);
@@ -1463,8 +1465,8 @@ function swcApply(c) {
     var head = c.makeup;
     if (useEq) { head.connect(c.eqHp); c.eqHp.connect(c.eqSh); c.eqSh.connect(c.eqLp1); c.eqLp1.connect(c.eqLp2); head = c.eqLp2; }
     if (usePre) { head.connect(c.pre); head = c.pre; }
-    if (useC) { head.connect(c.cessb); c.cessb.connect(c.dest); }
-    else { head.connect(c.clip); c.clip.connect(c.dest); }
+    if (useC) { head.connect(c.cessb); c.cessb.connect(c.trim); }
+    else { head.connect(c.clip); c.clip.connect(c.trim); }
     c.routeKey = key; c.route = useC;
   }
   if (c.cessb) c.cessb.port.postMessage({drive: Math.pow(10, SWC.drive / 20), ceiling: 0.85});
@@ -1527,6 +1529,9 @@ function buildMicChain(stream) {
   src.connect(c.inGain); c.inGain.connect(c.comp); c.comp.connect(c.makeup);
   c.makeup.connect(c.clip); c.clip.connect(dest);
   c.dest = dest; c.route = false;
+  // TX trim: the radio's ALC saturates near -12 dBFS of USB drive, so the final peaks are usually best kept
+  // just under that (set by the slider); a plain gain after all the processing, fixed at the destination.
+  c.trim = ac.createGain(); c.trim.connect(dest);
   var pc = preEmphCoefs(ac.sampleRate, 700, 4000);
   c.pre = ac.createIIRFilter(pc.ff, pc.fb);
   c.stream = dest.stream; c.track = dest.stream.getAudioTracks()[0];
@@ -1608,6 +1613,8 @@ function initSwcControls() {
     on.checked = !!SWC.on; amt.value = SWC.amt; lvl.value = SWC.level;
     document.getElementById('ic-swc-amt-val').textContent = SWC.amt + '%';
     document.getElementById('ic-mic-level-val').textContent = SWC.level + '%';
+    var tr = document.getElementById('ic-tx-trim');
+    if (tr) { tr.value = SWC.trim; document.getElementById('ic-tx-trim-val').textContent = SWC.trim + ' dB'; }
     var dr = document.getElementById('ic-cessb-drive');
     if (dr) { dr.value = SWC.drive; document.getElementById('ic-cessb-drive-val').textContent = '+' + SWC.drive + ' dB'; }
   }
@@ -1621,6 +1628,8 @@ function initSwcControls() {
   amt.oninput  = function () { SWC.amt = +amt.value; swcSave(); show(); swcApply(window._micChain); };
   var dck = document.getElementById('ic-deadcheck');
   if (dck) { dck.checked = !!SWC.deadCheck; dck.onchange = function () { SWC.deadCheck = dck.checked; swcSave(); }; }
+  var trm = document.getElementById('ic-tx-trim');
+  if (trm) trm.oninput = function () { SWC.trim = +trm.value; swcSave(); show(); swcApply(window._micChain); };
   var drv = document.getElementById('ic-cessb-drive');
   if (drv) drv.oninput = function () { SWC.drive = +drv.value; swcSave(); show(); swcApply(window._micChain); };
   lvl.oninput  = function () { SWC.level = +lvl.value; swcSave(); show(); swcApply(window._micChain); };
