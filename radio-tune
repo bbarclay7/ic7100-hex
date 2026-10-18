@@ -1,0 +1,107 @@
+#!/opt/ic7100ctl/venv/bin/python
+"""Tune the remote antenna tuner on a band: carrier at low power until the SWR settles. KEYS THE TRANSMITTER.
+
+usage:
+  radio-tune BAND|MHZ [-i] [--power PCT] [--limit SECS] [--restore]
+
+  radio-tune 40m           go to 7.074 MHz (the FT8 dial frequency), tune, finish there in USB-D
+  radio-tune 14.2 -i       tune on 14.200 MHz, showing the SWR as it settles
+  radio-tune 20m --restore tune, then put the frequency, mode and power back as they were
+
+  -i, --interactive   print every SWR reading as a bar, then a one-line trace at the end
+  --power PCT         tune power in percent of the radio's scale (default 15: about 15 W on HF)
+  --limit SECS        give up after this long (default 10)
+  --restore           end where the radio started, instead of on the band's FT8 frequency in USB-D
+
+Bands: 160m 80m 60m 40m 30m 20m 17m 15m 12m 10m 6m (FT8 dial frequencies, USB).
+Sets FM with DATA on (an unmodulated, pure carrier), keys, watches the SWR meter, and stops when it has
+been 1.5:1 or better for three readings in a row. It always unkeys and restores the power, even on
+Ctrl-C or an error. Exit status: 0 settled, 2 not settled, 1 error or refused.
+
+The CAT port must be free: run `radio-mode digital` first (stops the panel). HF and 6 m only.
+"""
+import argparse
+import subprocess
+import sys
+
+from ic7100ctl import tune as T
+from ic7100ctl.civ import CIVTransport
+from ic7100ctl.radio import IC7100
+
+PORT = '/dev/ic7100'
+BAR = 40
+
+
+def bar(ratio):
+    """Log scale, 1:1 at the left edge to 6:1 at the right, with a mark at the 1.5 target."""
+    import math
+    n = max(0, min(BAR, round(BAR * math.log(max(ratio, 1.0)) / math.log(6.0))))
+    goal = round(BAR * math.log(1.5) / math.log(6.0))
+    cells = ['#' if i < n else '.' for i in range(BAR)]
+    cells[goal] = '|' if cells[goal] == '.' else '+'
+    return ''.join(cells)
+
+
+def trace(samples):
+    levels = ' _.,:-=+*#'
+    out = []
+    for _, _, ratio in samples:
+        i = int(round((len(levels) - 1) * min(1.0, (ratio - 1.0) / 5.0)))
+        out.append(levels[i])
+    return ''.join(out)
+
+
+def main():
+    ap = argparse.ArgumentParser(add_help=False)
+    ap.add_argument('target', nargs='?')
+    ap.add_argument('-i', '--interactive', action='store_true')
+    ap.add_argument('--power', type=int, default=15)
+    ap.add_argument('--limit', type=float, default=10.0)
+    ap.add_argument('--restore', action='store_true')
+    ap.add_argument('-h', '--help', action='store_true')
+    a = ap.parse_args()
+    if a.help or not a.target:
+        print(__doc__)
+        return 0
+    if not 1 <= a.power <= 30:
+        sys.exit('refusing: --power must be 1-30 (percent); a tuner needs only a little')
+    if subprocess.run(['systemctl', 'is-active', '--quiet', 'ic7100ctl']).returncode == 0:
+        sys.exit('ic7100ctl is running and owns the radio: run `radio-mode digital` first')
+    try:
+        mhz = T.parse_target(a.target)
+    except T.TuneError as e:
+        sys.exit(str(e))
+
+    t = CIVTransport(PORT)
+    if not t.connect():
+        sys.exit(f'cannot open {PORT}')
+    r = IC7100(t)
+
+    def show(secs, raw, ratio):
+        print(f'{secs:5.1f} s  SWR {ratio:4.1f}:1  {bar(ratio)}', flush=True)
+
+    print(f'tuning on {mhz:.3f} MHz at {a.power}% (FM-D carrier), limit {a.limit:g} s'
+          + ('; Ctrl-C stops and unkeys' if a.interactive else ''), flush=True)
+    try:
+        res = T.tune(r, mhz=mhz, power=a.power, limit=a.limit,
+                     end='restore' if a.restore else 'ft8',
+                     on_sample=show if a.interactive else None)
+    except KeyboardInterrupt:
+        print('\ninterrupted: the radio was unkeyed and the power restored')
+        t.disconnect()
+        return 1
+    except T.TuneError as e:
+        print(f'error: {e}')
+        t.disconnect()
+        return 1
+    if a.interactive and res.samples:
+        print(f'trace: [{trace(res.samples)}]  (1:1 left, ~6:1 right)')
+    verdict = 'settled' if res.settled else f'NOT settled ({res.reason})'
+    final = f'{res.final_ratio:.1f}:1' if res.final_ratio else 'no reading'
+    print(f'{verdict}: SWR {final} after {res.seconds:.1f} s; now {r.get_freq():.3f} MHz '
+          f'{r.get_mode()}{"-D" if r.get_data_mode() else ""}, power {r.get_rf_power()}%')
+    t.disconnect()
+    return 0 if res.settled else 2
+
+
+sys.exit(main())
