@@ -87,6 +87,14 @@
       <span id="ic-bank-state" class="ic-label"></span>
       <button class="rb rb-sm" onclick="icCmd('call_channel')" title="Select dedicated CALL channel">CALL</button>
       <button class="rb rb-sm" onclick="icCmd('memory_to_vfo')" title="Copy memory channel to VFO">M&rarr;V</button>
+      <span id="ic-nr-top"><span class="sep">|</span>
+      <span class="ic-label">NR:</span>
+      <label><input type="checkbox" id="ic-nr-on" onchange="icCmd('nr', {on: this.checked})"> on</label>
+      <input id="ic-nr-level" type="range" min="0" max="100" step="1" value="50" class="ic-slider"
+             style="max-width:120px"
+             oninput="document.getElementById('ic-nr-level-val').textContent = this.value + '%'"
+             onchange="icCmd('nr', {level: +this.value})">
+      <span id="ic-nr-level-val" class="ic-slider-val">50%</span></span>
     </div>
     <!-- Head-unit style display: mode / tone / filter on top, frequency,
          memory name, annunciators, meters; MEMO/bank-channel and PTT at right. -->
@@ -367,14 +375,6 @@
              oninput="document.getElementById('ic-nb-level-val').textContent = this.value + '%'"
              onchange="icCmd('nb', {level: +this.value})">
       <span id="ic-nb-level-val" class="ic-slider-val">50%</span>
-      <span class="sep">|</span>
-      <span class="ic-label">NR:</span>
-      <label><input type="checkbox" id="ic-nr-on" onchange="icCmd('nr', {on: this.checked})"> on</label>
-      <input id="ic-nr-level" type="range" min="0" max="100" step="1" value="50" class="ic-slider"
-             style="max-width:160px"
-             oninput="document.getElementById('ic-nr-level-val').textContent = this.value + '%'"
-             onchange="icCmd('nr', {level: +this.value})">
-      <span id="ic-nr-level-val" class="ic-slider-val">50%</span>
     </div>
 
     <div class="ic-row">

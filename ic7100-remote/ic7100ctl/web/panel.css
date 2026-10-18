@@ -626,6 +626,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--t-accent); }
   box-shadow: 0 0 14px rgba(255, 82, 82, 0.6); }
 .lcd .ic-row { margin-bottom: 2px; }
 @media (max-width: 1000px) {
+  #ic-nr-top { display: none; }          /* the phone strip has its own NR */
   .lcd-wrap { flex-wrap: wrap; justify-content: center; }
   .lcd-wrap .lcd { order: -1; flex-basis: 100%; }
   .lcd-left { flex-direction: row; width: auto; }
