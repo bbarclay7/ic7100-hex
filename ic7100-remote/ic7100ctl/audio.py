@@ -175,7 +175,10 @@ class AlsaPlayback:
         self._dump = None
         self._dump_last = 0.0
         self._dump_drops = 0
+        self._dump_gaps = []
+        self._dump_t0 = 0.0
 
+    LATE_S = 0.04                # debug tap: report writes this far apart (frames are 20 ms)
     RETRY_S = 2.0                # how often to retry after the codec disappears
 
     def _spawn(self) -> subprocess.Popen:
@@ -264,13 +267,21 @@ class AlsaPlayback:
         if self._dump is not None and now - self._dump_last > 1.5:
             name, size = self._dump.name, self._dump.tell()
             self._dump.close()
+            g = self._dump_gaps
             print(f"[tx-dump] {name}: {size} bytes, "
-                  f"{self.dropped - self._dump_drops} frames dropped", flush=True)
+                  f"{self.dropped - self._dump_drops} frames dropped, "
+                  f"{len(g)} late frames (>{self.LATE_S * 1000:.0f} ms apart)"
+                  + (f", worst {max(g)[0] * 1000:.0f} ms at {max(g)[1]:.1f} s" if g else ''), flush=True)
             self._dump = None
         if self._dump is None:
             os.makedirs(self._dump_dir, exist_ok=True)
             self._dump = open(os.path.join(self._dump_dir, time.strftime('tx_%H%M%S.raw')), 'wb')
             self._dump_drops = self.dropped
+            self._dump_gaps, self._dump_t0, self._dump_last = [], now, now
+        # Frames come every 20 ms; a long wait between writes is what the radio hears as a
+        # dropout (aplay underruns), and the tap alone cannot show it.
+        if now - self._dump_last > self.LATE_S:
+            self._dump_gaps.append((now - self._dump_last, now - self._dump_t0))
         self._dump.write(frame)
         self._dump.flush()
         self._dump_last = now
