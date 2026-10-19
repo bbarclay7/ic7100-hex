@@ -190,11 +190,33 @@ class RadioServer:
         from . import webrtc
         self._tx_frames0 = (webrtc._TX_STATE['n'], webrtc._TX_STATE['fwd'])
         webrtc._TX_STATE['peak'] = 0
+        self._trace = None
+        d = os.environ.get('IC7100_TX_DUMP')       # debug: with the audio tap, keep the meters over time
+        if d:
+            try:
+                os.makedirs(d, exist_ok=True)
+                self._trace = open(os.path.join(d, time.strftime('tx_%H%M%S.csv')), 'w')
+                self._trace.write('t_s,po,alc,comp,swr,id,vd,frames_dropped\n')
+                self._trace_t0 = time.monotonic()
+            except OSError:
+                self._trace = None
+
+    def _trace_row(self) -> None:
+        f, r = getattr(self, '_trace', None), self.radio
+        if f is None:
+            return
+        pb = getattr(getattr(self.webrtc_bridge, 'playback', None), 'dropped', '')
+        f.write(f"{time.monotonic() - self._trace_t0:.2f},{r.po},{r.alc},{r.comp},{r.swr},"
+                f"{r.idrain},{r.vd},{pb}\n")
+        f.flush()
 
     def _tx_ended(self, s: dict) -> None:
         """One log line per transmit: what actually went out, and whether the
         browser's mic audio reached the radio."""
         from . import webrtc
+        if getattr(self, '_trace', None):
+            self._trace.close()
+            self._trace = None
         n0, f0 = getattr(self, '_tx_frames0', (0, 0))
         got, fwd = webrtc._TX_STATE['n'] - n0, webrtc._TX_STATE['fwd'] - f0
         pk = webrtc._TX_STATE['peak']
@@ -284,6 +306,7 @@ class RadioServer:
                 if getattr(self.radio, 'transmitting', False):
                     try:
                         self.radio.poll_meters_tx()
+                        self._trace_row()
                     except Exception as e:
                         print(f"[RadioServer] poll_meters_tx error: {e}",
                               flush=True)
