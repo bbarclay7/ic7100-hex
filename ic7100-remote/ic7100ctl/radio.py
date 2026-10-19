@@ -582,11 +582,13 @@ class IC7100:
 
     # -- Split / RIT / XIT --
 
-    # Split VFO — 0x0F (0x00=simplex, 0x01=split).
+    # Split / duplex — 0x0F (0x00 split off, 0x01 split on, 0x10 simplex, 0x11 DUP-, 0x12 DUP+).
     def get_split(self) -> Optional[bool]:
         resp = self._txn(0x0f)
         if resp and len(resp) >= 2 and resp[0] == 0x0f:
-            self.split = bool(resp[1])
+            # 0F reads split (00 off, 01 on) and duplex (10 simplex, 11 DUP-, 12 DUP+) in one byte.
+            self.duplex = {0x11: '-', 0x12: '+'}.get(resp[1], '')
+            self.split = resp[1] == 0x01
             return self.split
         return None
 

@@ -414,6 +414,7 @@ class RadioServer:
             'mic_gain':          int(getattr(r, 'mic_gain', 50) or 50),
             'af_level':          int(getattr(r, 'af_level', 50) or 50),
             'data_mode':         bool(getattr(r, 'data_mode', False)),
+            'duplex':            getattr(r, 'duplex', ''),
             # VFO / memory
             'active_vfo':        getattr(r, 'active_vfo', 'A'),
             'memory_mode':       bool(getattr(r, 'memory_mode', False)),

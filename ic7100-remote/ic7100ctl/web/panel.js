@@ -1339,6 +1339,7 @@ function pollStatus() {
       if (s.nr_on) an.push('NR');
       if (s.comp_on) an.push('COMP');
       if (s.split) an.push('SPLIT');
+      if (s.duplex) an.push('DUP' + s.duplex);
       if (s.rit_on) an.push('RIT');
       if (s.xit_on) an.push('XIT');
       if (s.data_mode) an.push('DATA');
